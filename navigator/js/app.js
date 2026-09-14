@@ -767,8 +767,13 @@ async function boot() {
   document.body.dataset.ready = 'true';
 }
 
-/* Expose a little of the app for debugging without opening a console tab. */
-globalThis.compass = { app, store, settings, mapview, engine, radar, voice };
+/* Debug surface. The single-file build has no module graph to import from, so
+   the pieces worth poking at from a console are exposed here explicitly. */
+globalThis.compass = {
+  app, store, settings, mapview, engine, radar, voice,
+  planRoute, planAlternativesOffline,
+  version: '1.0.0',
+};
 
 boot().catch((err) => {
   console.error(err);

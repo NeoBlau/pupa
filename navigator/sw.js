@@ -44,6 +44,10 @@ const TILE_HOSTS = [
 
 const API_HOSTS = ['api.open-meteo.com', 'photon.komoot.io', 'nominatim.openstreetmap.org'];
 
+/* The CDN fallback for MapLibre belongs to the shell, not to the API cache:
+   once it has loaded, the app must start offline like the vendored copy. */
+const SHELL_CDN = ['cdnjs.cloudflare.com'];
+
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
     const cache = await caches.open(SHELL_CACHE);
@@ -76,6 +80,11 @@ self.addEventListener('fetch', (event) => {
 
   if (url.origin === self.location.origin) {
     event.respondWith(request.mode === 'navigate' ? shellNavigation(request) : shellAsset(request));
+    return;
+  }
+
+  if (SHELL_CDN.some((host) => url.hostname.endsWith(host))) {
+    event.respondWith(shellAsset(request));
     return;
   }
 

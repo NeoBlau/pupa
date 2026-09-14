@@ -13,9 +13,18 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="assets/icon-180.png">
 <link rel="icon" href="assets/icon-192.png" sizes="192x192">
-<link rel="stylesheet" href="vendor/maplibre-gl.css">
+<link rel="stylesheet" href="vendor/maplibre-gl.css"
+      onerror="this.onerror=null;this.href='https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/4.7.1/maplibre-gl.css'">
 <link rel="stylesheet" href="css/app.css">
 <script src="vendor/maplibre-gl.js"></script>
+<script>
+  /* MapLibre is vendored so the app starts with no network at all. If someone
+     copies the app without vendor/, fall back to a pinned CDN build rather than
+     showing a blank screen. The service worker caches whichever one loads. */
+  if (!window.maplibregl) {
+    document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/4.7.1/maplibre-gl.js"><\/script>');
+  }
+</script>
 </head>
 <body>
   <div id="app">

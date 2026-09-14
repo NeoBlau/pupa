@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+<title>Компас — навигатор</title>
+<meta name="description" content="Офлайн и онлайн навигатор: маршруты без сети, радар камер, погода в пути и живописные пешие тропы.">
+<meta name="theme-color" content="#f2f2f7">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Компас">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="assets/icon-180.png">
+<link rel="icon" href="assets/icon-192.png" sizes="192x192">
+<link rel="stylesheet" href="vendor/maplibre-gl.css">
+<link rel="stylesheet" href="css/app.css">
+<script src="vendor/maplibre-gl.js"></script>
+</head>
+<body>
+  <div id="app">
+    <div id="map"></div>
+    <noscript style="position:absolute;inset:0;display:grid;place-items:center;padding:24px;text-align:center">
+      Для работы навигатора нужен JavaScript.
+    </noscript>
+  </div>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

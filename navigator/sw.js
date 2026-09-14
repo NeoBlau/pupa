@@ -38,6 +38,7 @@ const TILE_HOSTS = [
   'tile.opentopomap.org',
   's3.amazonaws.com',
   'tilecache.rainviewer.com',
+  'api.tomtom.com',
   'fonts.openmaptiles.org',
 ];
 

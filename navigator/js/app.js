@@ -197,6 +197,7 @@ const app = {
 
   applyTheme,
   applyWakeLock,
+  applyTraffic,
   refreshWeather,
 
   /* --- offline --- */
@@ -484,6 +485,15 @@ function applyTheme() {
     ?.setAttribute('content', theme === 'dark' ? '#000000' : '#f2f2f7');
 }
 
+/** Turn the traffic layer on when — and only when — a key is present. */
+function applyTraffic() {
+  const key = settings.get('trafficKey');
+  const on = mapview.setTrafficLayer(key, settings.get('trafficProvider'));
+  settings.set('showTraffic', !!key);
+  toast(on ? t('settings.trafficOn') : t('settings.trafficOff'));
+  return on;
+}
+
 async function applyWakeLock() {
   if (!settings.get('keepAwake') || !('wakeLock' in navigator)) return releaseWakeLock();
   if (wakeLock) return;
@@ -722,6 +732,10 @@ async function boot() {
   voice.configure({ lang: settings.get('lang'), mode: settings.get('voice'), rate: settings.get('voiceRate') });
   radar.configure({ enabled: settings.get('cameraAlerts'), types: settings.get('cameraAlertTypes') });
   hud.setMuted(settings.get('voice') === 'off');
+
+  if (settings.get('trafficKey')) {
+    mapview.setTrafficLayer(settings.get('trafficKey'), settings.get('trafficProvider'));
+  }
 
   wireMap();
   wireEngine();

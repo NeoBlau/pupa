@@ -8,7 +8,7 @@
 import { el, formatDistance, formatDuration, formatClock, clamp } from '../lib/util.js';
 import { t, getLang } from '../i18n/strings.js';
 import { icon, maneuverSVG } from './icons.js';
-import { phraseFor, maneuverIcon } from '../routing/maneuvers.js';
+import { phraseFor, maneuverIcon, LANE_GLYPH } from '../routing/maneuvers.js';
 import { CAMERA_LABEL_KEY } from '../features/cameras.js';
 import { settings } from '../core/settings.js';
 
@@ -16,6 +16,7 @@ export class NavHUD {
   #root; #nodes = {};
   #cameraTimer = null;
   #lastManeuverKey = '';
+  #laneKey = '';
 
   mount(parent) {
     const n = this.#nodes;
@@ -30,6 +31,9 @@ export class NavHUD {
     n.banner = el('div', { class: 'maneuver-banner' },
       n.arrow,
       el('div', { class: 'maneuver-text' }, n.distance, n.street, n.then));
+
+    /* --- lane guidance --- */
+    n.laneStrip = el('div', { class: 'lane-strip', style: { display: 'none' } });
 
     /* --- camera alert + average-speed zone --- */
     n.cameraAlert = el('div', { class: 'camera-alert', style: { display: 'none' } });
@@ -59,7 +63,7 @@ export class NavHUD {
       n.overviewBtn, n.muteBtn, n.endBtn);
 
     this.#root = el('div', { class: 'hud' },
-      n.banner, n.cameraAlert, n.zoneStrip, n.speedCluster, n.bottom);
+      n.banner, n.laneStrip, n.cameraAlert, n.zoneStrip, n.speedCluster, n.bottom);
     parent.append(this.#root);
     return this;
   }
@@ -106,6 +110,27 @@ export class NavHUD {
 
     const kmh = Math.round((progress.speed ?? 0) * 3.6);
     n.speedValue.textContent = String(kmh);
+
+    // lanes are only useful once you are close enough to choose one
+    this.setLanes(progress.distanceToManeuver < 500 ? step?.lanes : null);
+  }
+
+  /** @param {Array<{indications:string[], valid:boolean, active:boolean}>|null} lanes */
+  setLanes(lanes) {
+    const node = this.#nodes.laneStrip;
+    if (!lanes?.length) {
+      if (this.#laneKey !== '') { node.style.display = 'none'; this.#laneKey = ''; }
+      return;
+    }
+    const key = lanes.map((l) => `${l.indications.join('')}${l.valid ? 1 : 0}${l.active ? 'a' : ''}`).join('|');
+    if (key === this.#laneKey) return;
+    this.#laneKey = key;
+
+    node.style.display = '';
+    node.replaceChildren(...lanes.map((lane) => el('div', {
+      class: `lane ${lane.valid ? 'valid' : ''} ${lane.active ? 'active' : ''}`.trim(),
+    }, lane.indications.map((i) => LANE_GLYPH[i] ?? '↑').join('') || '↑')));
+    this.layout();
   }
 
   /** Speed limit sign and the over-limit state of the speedometer. */
@@ -161,7 +186,10 @@ export class NavHUD {
   /** Offset the camera alert below the banner, whose height varies with "then". */
   layout() {
     const bannerHeight = this.#nodes.banner.getBoundingClientRect().height;
-    const top = `calc(env(safe-area-inset-top, 0px) + ${bannerHeight + 20}px)`;
+    const laneVisible = this.#nodes.laneStrip.style.display !== 'none';
+    const laneHeight = laneVisible ? this.#nodes.laneStrip.getBoundingClientRect().height + 8 : 0;
+    this.#nodes.laneStrip.style.top = `calc(env(safe-area-inset-top, 0px) + ${bannerHeight + 18}px)`;
+    const top = `calc(env(safe-area-inset-top, 0px) + ${bannerHeight + 20 + laneHeight}px)`;
     this.#nodes.cameraAlert.style.top = top;
     this.#nodes.zoneStrip.style.top = top;
   }
@@ -171,7 +199,9 @@ export class NavHUD {
     document.body.classList.remove('navigating');
     this.#nodes.cameraAlert.style.display = 'none';
     this.#nodes.zoneStrip.style.display = 'none';
+    this.#nodes.laneStrip.style.display = 'none';
     this.#lastManeuverKey = '';
+    this.#laneKey = '';
   }
 }
 

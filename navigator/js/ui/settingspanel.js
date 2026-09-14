@@ -79,6 +79,23 @@ export function settingsPanel(app) {
       body.append(el('div', { class: 'kv' }, el('span', { class: 'kv-label', text: t('settings.speedWarnBy') }), label));
       body.append(threshold);
 
+      /* --- traffic: opt-in, because there is no honest free source --- */
+      body.append(sectionTitle(t('map.traffic')));
+      const keyInput = el('input', {
+        type: 'password', autocomplete: 'off', spellcheck: 'false',
+        placeholder: t('settings.trafficKey'), value: settings.get('trafficKey'),
+        style: { flex: '1', minWidth: '0', fontSize: '15px' },
+      });
+      body.append(el('div', { class: 'search-field', style: { marginBottom: '8px' } }, keyInput,
+        el('button', {
+          class: 'btn small',
+          onClick: () => {
+            settings.set('trafficKey', keyInput.value.trim());
+            app.applyTraffic();
+          },
+        }, t('common.save'))));
+      body.append(el('div', { class: 'hint', text: t('settings.trafficHint') }));
+
       /* --- tracks --- */
       body.append(sectionTitle(t('track.list')));
       body.append(tracksList(app));

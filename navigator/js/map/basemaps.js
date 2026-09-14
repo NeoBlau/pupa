@@ -50,6 +50,20 @@ export const TERRAIN_SOURCE = {
   attribution: 'Elevation © Mapzen / AWS Terrain Tiles',
 };
 
+/**
+ * Live traffic needs a commercial feed; there is no key-free source that is
+ * legal and current. The layer is therefore opt-in: paste a key and it appears,
+ * otherwise the app shows no traffic at all rather than inventing it.
+ */
+export const TRAFFIC_PROVIDERS = {
+  tomtom: {
+    id: 'tomtom', label: 'TomTom',
+    url: (key) => `https://api.tomtom.com/traffic/map/4/tile/flow/relative0/{z}/{x}/{y}.png?key=${encodeURIComponent(key)}`,
+    maxzoom: 18, attribution: '© TomTom Traffic',
+    signupUrl: 'https://developer.tomtom.com/',
+  },
+};
+
 /** Empty GeoJSON collections the overlay layers bind to before data arrives. */
 const EMPTY = { type: 'FeatureCollection', features: [] };
 const geojson = (extra = {}) => ({ type: 'geojson', data: EMPTY, ...extra });

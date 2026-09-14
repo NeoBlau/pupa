@@ -436,6 +436,28 @@ body.navigating .controls { opacity: 0; pointer-events: none; transform: transla
 }
 .limit-sign.hidden { display: none; }
 
+/* lane guidance */
+.lane-strip {
+  position: absolute; left: calc(var(--safe-l) + 10px); right: calc(var(--safe-r) + 10px);
+  max-width: 520px; margin: 0 auto;
+  display: flex; justify-content: center; gap: 3px;
+  padding: 8px 10px; border-radius: var(--r-md);
+  background: rgba(18, 18, 20, 0.86);
+  -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
+  box-shadow: var(--shadow-hud); pointer-events: none;
+  animation: slide-in 0.3s var(--ease) both;
+}
+.lane {
+  min-width: 34px; height: 38px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center; gap: 1px;
+  font-size: 19px; line-height: 1;
+  color: rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.05);
+}
+/* a usable lane is bright; the recommended one is filled so it reads instantly */
+.lane.valid { color: #ffffff; background: rgba(255, 255, 255, 0.12); }
+.lane.active { color: #0b0d10; background: var(--green); font-weight: 700; }
+
 /* camera alert */
 .camera-alert {
   position: absolute; top: calc(var(--safe-t) + 110px);

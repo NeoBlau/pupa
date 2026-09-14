@@ -28,6 +28,8 @@ const DEFAULTS = {
   routePreference: 'fastest', // fastest | shortest | scenic
   profile: 'car',             // car | bike | foot | hike
   tilesKey: '',               // optional MapTiler key for vector basemaps
+  trafficKey: '',             // TomTom key — the only way to get real live traffic
+  trafficProvider: 'tomtom',
   homePoint: null,
   workPoint: null,
   onboarded: false,

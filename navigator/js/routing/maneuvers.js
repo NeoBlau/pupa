@@ -69,6 +69,7 @@ const SIGNIFICANT = new Set(['slight left', 'left', 'sharp left', 'slight right'
  * @param {{coordinates:number[][], edges:number[], reversed:boolean[], distance:number, duration:number}} r
  */
 export function stepsFromGraphRoute(g, r) {
+  // distances here are measured from the geometry, so there is nothing declared
   const steps = [];
   const coords = r.coordinates;
 
@@ -132,6 +133,7 @@ export function stepsFromGraphRoute(g, r) {
     coordinate: coords[coords.length - 1], geometryIndex: coords.length - 1,
   });
 
+  for (const step of steps) step.declaredDistance = 0;
   return normaliseSteps(steps, r);
 }
 
@@ -182,6 +184,7 @@ export function stepsFromOSRM(legs, coordinates) {
         distance: s.distance, duration: s.duration,
         coordinate: man.location,
         bearingBefore: man.bearing_before, bearingAfter: man.bearing_after,
+        lanes: lanesFor(s, man),
         geometryIndex: geomBase,
       });
       geomBase += Math.max(0, (s.geometry?.coordinates?.length ?? 1) - 1);
@@ -197,6 +200,35 @@ export function stepsFromOSRM(legs, coordinates) {
   }
   return normaliseSteps(steps, { coordinates });
 }
+
+/**
+ * Lane guidance for a manoeuvre.
+ *
+ * OSRM hangs lanes off the intersection you pass through, so the lanes that
+ * matter for a turn belong to the intersection where the turn happens — the
+ * first one of the step. A lane is `valid` when it can be used for this
+ * manoeuvre, and `active` when OSRM recommends it specifically.
+ */
+function lanesFor(step, maneuver) {
+  const raw = step.intersections?.[0]?.lanes;
+  if (!Array.isArray(raw) || !raw.length) return null;
+  const lanes = raw.map((lane) => ({
+    indications: (lane.indications ?? []).filter((i) => i && i !== 'none'),
+    valid: lane.valid !== false,
+    active: lane.active === true || (lane.valid !== false && lane.valid_indication != null),
+    preferred: lane.valid_indication ?? null,
+  }));
+  // all-valid lane sets tell the driver nothing; suppress them
+  return lanes.some((l) => !l.valid) ? lanes : null;
+}
+
+/** Arrow glyph for a lane indication, oriented as painted on the road. */
+export const LANE_GLYPH = {
+  'straight': '↑', 'uturn': '↩',
+  'slight left': '↖', 'left': '←', 'sharp left': '↰',
+  'slight right': '↗', 'right': '→', 'sharp right': '↱',
+  'merge to left': '↖', 'merge to right': '↗',
+};
 
 function indexAtDistance(cum, dist) {
   let lo = 0, hi = cum.length - 1;
@@ -215,17 +247,22 @@ function normaliseSteps(steps, r) {
     s.index = i;
     s.alongStart = cum[Math.min(s.geometryIndex, cum.length - 1)];
     s.nextName = steps[i + 1]?.name ?? '';
+    s.lanes = s.lanes ?? null;
   }
   for (let i = 0; i < steps.length; i++) {
     const next = steps[i + 1];
+    // an adapted route already carries the planner's own step length; keep it as
+    // the authority, so a geometry mismatch cannot silently delete a manoeuvre
+    if (steps[i].declaredDistance === undefined) steps[i].declaredDistance = steps[i].distance;
     steps[i].distance = next ? Math.max(0, next.alongStart - steps[i].alongStart) : 0;
     steps[i].remaining = Math.max(0, total - steps[i].alongStart);
   }
 
   /* Drop sub-10 m stubs — usually the last metres of a snapped destination edge.
      Real navigators never announce those. `depart` and `arrive` always survive. */
+  const lengthOf = (s) => Math.max(s.distance, s.declaredDistance ?? 0);
   const kept = steps.filter((s, i) =>
-    s.type === 'depart' || s.type === 'arrive' || s.distance >= 10 || i === 0);
+    s.type === 'depart' || s.type === 'arrive' || lengthOf(s) >= 10 || i === 0);
   if (kept.length !== steps.length) {
     for (let i = 0; i < kept.length; i++) {
       const next = kept[i + 1];

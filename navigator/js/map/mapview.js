@@ -7,7 +7,7 @@
 
 import { Emitter, throttle, clamp } from '../lib/util.js';
 import { bboxOf } from '../lib/geo.js';
-import { buildStyle, BASEMAPS, LAYER_GROUPS } from './basemaps.js';
+import { buildStyle, BASEMAPS, LAYER_GROUPS, TRAFFIC_PROVIDERS } from './basemaps.js';
 import { PUCK_SVG } from '../ui/icons.js';
 
 const FOLLOW = { zoom: 16.8, pitch: 60, offsetFraction: 0.28 };
@@ -23,6 +23,8 @@ export class MapView extends Emitter {
   #followMode = 'follow';
   #userInteracting = false;
   #lastHeading = 0;
+  #traffic = null;
+  #rain = null;
 
   async init(container, { styleId = 'day', center = [37.6173, 55.7558], zoom = 11, hillshade = false } = {}) {
     this.#styleId = styleId;
@@ -190,11 +192,35 @@ export class MapView extends Emitter {
   setRainLayer(template) {
     if (!this.map) return;
     if (this.map.getLayer('rain')) { this.map.removeLayer('rain'); this.map.removeSource('rain'); }
+    this.#rain = template ?? null;
     if (!template) return;
     this.map.addSource('rain', { type: 'raster', tiles: [template], tileSize: 256, maxzoom: 12 });
     this.map.addLayer({ id: 'rain', type: 'raster', source: 'rain', paint: { 'raster-opacity': 0.6 } },
       firstSymbolLayer(this.map));
   }
+
+  /** Live traffic tiles, if the user supplied a provider key. */
+  setTrafficLayer(key, provider = 'tomtom') {
+    if (!this.map) return false;
+    if (this.map.getLayer('traffic-tiles')) {
+      this.map.removeLayer('traffic-tiles');
+      this.map.removeSource('traffic-tiles');
+    }
+    const def = TRAFFIC_PROVIDERS[provider];
+    if (!key || !def) return false;
+    this.map.addSource('traffic-tiles', {
+      type: 'raster', tiles: [def.url(key)], tileSize: 256,
+      maxzoom: def.maxzoom, attribution: def.attribution,
+    });
+    this.map.addLayer({
+      id: 'traffic-tiles', type: 'raster', source: 'traffic-tiles',
+      paint: { 'raster-opacity': 0.85 },
+    }, firstSymbolLayer(this.map));
+    this.#traffic = { key, provider };
+    return true;
+  }
+
+  get hasTraffic() { return !!this.#traffic; }
 
   /* ---------- style ---------- */
 
@@ -206,6 +232,9 @@ export class MapView extends Emitter {
     this.map.setStyle(buildStyle(styleId, { hillshade }), { diff: false });
     await new Promise((resolve) => this.map.once('styledata', resolve));
     for (const [id, data] of snapshot) this.map.getSource(id)?.setData(data);
+    // setStyle drops layers added after load; put the optional ones back
+    if (this.#traffic) this.setTrafficLayer(this.#traffic.key, this.#traffic.provider);
+    if (this.#rain) this.setRainLayer(this.#rain);
     this.emit('style', styleId);
   }
 

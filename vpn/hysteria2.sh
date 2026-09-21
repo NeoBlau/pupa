@@ -206,11 +206,9 @@ quic:
   initConnReceiveWindow: 20971520
   maxConnReceiveWindow: 20971520
 
-# 0 = не ограничивать и полагаться на BBR-подобный контроль самого Hysteria.
-bandwidth:
-  up: 0
-  down: 0
-
+# Секции bandwidth тут намеренно нет: отсутствие = без ограничения скорости.
+# Написать "up: 0" нельзя — бинарник отвечает "bandwidth.up: invalid format",
+# несмотря на то, что документация такой вариант разрешает.
 ignoreClientBandwidth: false
 disableUDP: false
 EOF

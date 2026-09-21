@@ -18,10 +18,17 @@ Hysteria 2 — не «VPN» в смысле WireGuard, который подни
 
 ### Вариант А — есть домен (так лучше)
 
+Сначала скачиваем скрипт:
+
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/NeoBlau/pupa/claude/vpn-server-setup-meszeh/vpn/hysteria2.sh
 chmod +x hysteria2.sh
-sudo ./hysteria2.sh install --domain vpn.example.com --email me@example.com
+```
+
+Потом запускаем — **подставив свой домен и свою почту вместо примеров ниже**:
+
+```bash
+sudo ./hysteria2.sh install --domain МОЙ.ДОМЕН --email МОЯ@ПОЧТА
 ```
 
 Домен должен A-записью указывать на IP сервера, а TCP/80 — быть свободен: там
@@ -30,9 +37,13 @@ Let's Encrypt проверяет владение. Дальше сертифик
 
 ### Вариант Б — домена нет
 
+Скачиваем так же, как выше, и запускаем без флагов:
+
 ```bash
 sudo ./hysteria2.sh install
 ```
+
+Тут подставлять нечего — команда копируется как есть.
 
 Сгенерится самоподписанный сертификат с SNI `www.bing.com`, а клиент будет
 проверять его по отпечатку (`pinSHA256`) вместо цепочки CA. Работает сразу,
@@ -74,6 +85,7 @@ sudo ./hysteria2.sh show incy       # ссылка, QR и YAML существу�
 sudo ./hysteria2.sh key             # только ссылка одной строкой
 sudo ./hysteria2.sh del phone       # отозвать доступ
 sudo ./hysteria2.sh status          # жив ли сервис
+sudo ./hysteria2.sh repair          # пересобрать конфиг и права, если сервис не стартует
 sudo ./hysteria2.sh uninstall       # снести всё
 ```
 
@@ -166,6 +178,10 @@ sudo journalctl -u hysteria-server -n 50        # что он пишет
 sudo ss -lnup | grep hysteria                   # слушает ли UDP-порт
 ```
 
+- **`failed to read server config` / `permission denied`** — сервис работает от
+  пользователя `hysteria` и не может прочитать `/etc/hysteria/config.yaml`.
+  Лечится одной командой: `sudo ./hysteria2.sh repair`. Скрипт пересоберёт конфиг,
+  разложит права и перезапустит сервис.
 - **Сервис не стартует, в логах ACME** — домен не резолвится на этот IP либо TCP/80
   занят (чаще всего nginx). Останови его и перезапусти сервис.
 - **Сервис жив, клиент молчит** — фаервол хостера. У Hetzner, Oracle, AWS, GCP есть

@@ -9,6 +9,7 @@
 #   show NAME     ссылка hy2://, QR-код и YAML-конфиг клиента
 #   key [NAME]    только ссылка hy2:// одной строкой, для копирования
 #   status        состояние сервиса
+#   repair        пересобрать конфиг и права, если сервис не стартует
 #   uninstall     снести всё
 #
 # Подробности и разбор флагов — в vpn/README.md рядом.
@@ -60,6 +61,41 @@ urlencode() {
     esac
   done
   printf '%s' "$out"
+}
+
+# Сервис работает не от root, а от системного пользователя hysteria.
+# Поэтому /etc/hysteria должен быть доступен его группе, иначе сервис
+# не сможет даже войти в каталог и упадёт с "failed to read server config".
+svc_user() {
+  local u=${HY_SVC_USER:-hysteria}
+  id -u "$u" >/dev/null 2>&1 && { printf '%s' "$u"; return; }
+  printf 'root'
+}
+
+fix_perms() {
+  local u; u=$(svc_user)
+
+  chown "root:$u" "$CONF_DIR" 2>/dev/null || true
+  chmod 750 "$CONF_DIR"
+
+  # Конфиг и ключ читает сервис — отдаём по группе, но не всему миру.
+  local f
+  for f in "$CONFIG" "$KEY"; do
+    [[ -e $f ]] || continue
+    chown "root:$u" "$f" 2>/dev/null || true
+    chmod 640 "$f"
+  done
+  if [[ -e $CERT ]]; then
+    chown "root:$u" "$CERT" 2>/dev/null || true
+    chmod 644 "$CERT"
+  fi
+
+  # А это сервису не нужно вообще: пароли клиентов и параметры установки.
+  for f in "$ENV_FILE" "$USERS_FILE"; do
+    [[ -e $f ]] || continue
+    chown root:root "$f" 2>/dev/null || true
+    chmod 600 "$f"
+  done
 }
 
 # ---------------------------------------------------------------- проверки ---
@@ -179,8 +215,7 @@ ignoreClientBandwidth: false
 disableUDP: false
 EOF
 
-  chown hysteria:hysteria "$CONFIG" 2>/dev/null || true
-  chmod 600 "$CONFIG"
+  fix_perms
 }
 
 client_uri() {
@@ -298,7 +333,11 @@ restart_server() {
   sleep 2
   if ! systemctl is-active --quiet hysteria-server.service; then
     warn "Сервис не поднялся. Логи:"
-    journalctl -u hysteria-server.service -n 40 --no-pager || true
+    # -o cat без префиксов: иначе длинная JSON-ошибка уезжает за край экрана.
+    journalctl -u hysteria-server.service -n 25 --no-pager -o cat || true
+    echo >&2
+    warn "Права на /etc/hysteria (сервис работает от '$(svc_user)'):"
+    ls -la "$CONF_DIR" >&2 || true
     die "hysteria-server не запустился — смотри вывод выше."
   fi
 }
@@ -328,6 +367,17 @@ cmd_install() {
   done
 
   [[ $port =~ ^[0-9]+$ && $port -ge 1 && $port -le 65535 ]] || die "Плохой порт: $port"
+
+  # Ловим placeholder'ы вида vpn.твой.com, скопированные из инструкции как есть.
+  if [[ -n $domain ]]; then
+    [[ $domain =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$ ]] \
+      || die "'$domain' не похож на домен. Подставь свой настоящий, а не пример из инструкции."
+    [[ $domain =~ (твой|example|yourdomain|домен) ]] \
+      && die "'$domain' — это заглушка из инструкции. Нужен твой реальный домен, или ставь без --domain."
+  fi
+  if [[ -n $email && ! $email =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]]; then
+    die "'$email' не похож на почту. Подставь свою настоящую."
+  fi
   client_name=$(sanitize_name "$client_name")
 
   log "Ставлю зависимости"
@@ -365,21 +415,32 @@ cmd_install() {
   fi
 
   log "Ставлю Hysteria 2"
-  bash <(curl -fsSL https://get.hy2.sh/) >/dev/null 2>&1 \
-    || die "Официальный установщик Hysteria не отработал. Проверь сеть и DNS на сервере."
-  command -v hysteria >/dev/null 2>&1 || die "Бинарник hysteria не появился в PATH"
-  log "Версия: $(hysteria version 2>/dev/null | head -n1)"
+  local inst_log=/var/log/hysteria-install.log
+  if ! bash <(curl -fsSL https://get.hy2.sh/) >"$inst_log" 2>&1; then
+    tail -n 20 "$inst_log" >&2 || true
+    die "Официальный установщик Hysteria не отработал, лог целиком: $inst_log"
+  fi
+  command -v hysteria >/dev/null 2>&1 || die "Бинарник hysteria не появился в PATH, лог: $inst_log"
+
+  # hysteria version печатает многострочную простыню, первая строка бывает пустой.
+  local ver
+  ver=$(hysteria version 2>&1 | grep -iom1 'v[0-9][0-9.]*' || true)
+  log "Версия: ${ver:-не определилась (не страшно, бинарник на месте)}"
+
+  HY_SVC_USER=$(svc_user)
+  if [[ $HY_SVC_USER == root ]]; then
+    warn "Системный пользователь hysteria не создан — сервис пойдёт от root."
+  fi
+
 
   mkdir -p "$CONF_DIR"
-  chmod 750 "$CONF_DIR"
 
   if [[ $mode == selfsigned ]]; then
     log "Генерю самоподписанный сертификат на CN=$sni"
     openssl req -x509 -nodes -days 3650 \
       -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
       -keyout "$KEY" -out "$CERT" -subj "/CN=$sni" 2>/dev/null
-    chown hysteria:hysteria "$CERT" "$KEY" 2>/dev/null || true
-    chmod 600 "$KEY"; chmod 644 "$CERT"
+    HY_SVC_USER=$(svc_user)
   fi
 
   local pin=''
@@ -388,7 +449,7 @@ cmd_install() {
   fi
 
   local obfs_pass=''
-  [[ $obfs -eq 1 ]] && obfs_pass=$(rand_str 20)
+  if [[ $obfs -eq 1 ]]; then obfs_pass=$(rand_str 20); fi
 
   umask 077
   cat > "$ENV_FILE" <<EOF
@@ -401,6 +462,7 @@ HY_SNI=$sni
 HY_PIN=$pin
 HY_OBFS_PASS=$obfs_pass
 HY_MASQ_URL=$masq_url
+HY_SVC_USER=$HY_SVC_USER
 EOF
   chmod 600 "$ENV_FILE"
 
@@ -509,6 +571,20 @@ cmd_key() {
   echo
 }
 
+# Спасательный круг для установки, которую уронила старая версия скрипта.
+cmd_repair() {
+  need_root repair
+  require_installed
+  # shellcheck disable=SC1090
+  . "$ENV_FILE"
+  log "Пересобираю конфиг и раскладываю права заново"
+  write_config
+  fix_perms
+  restart_server
+  log "Сервис поднялся. Ключ:"
+  cmd_key
+}
+
 cmd_status() {
   need_root status
   systemctl status hysteria-server.service --no-pager -l || true
@@ -529,7 +605,7 @@ cmd_uninstall() {
 }
 
 usage() {
-  sed -n '3,15p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '3,16p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 main() {
@@ -542,6 +618,7 @@ main() {
     list|list-clients) cmd_list ;;
     show)           cmd_show "$@" ;;
     key)            cmd_key "$@" ;;
+    repair)         cmd_repair ;;
     status)         cmd_status ;;
     uninstall)      cmd_uninstall ;;
     -h|--help|help) usage ;;

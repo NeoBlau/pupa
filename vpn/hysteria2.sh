@@ -7,6 +7,7 @@
 #   del NAME      удалить клиента
 #   list          список клиентов
 #   show NAME     ссылка hy2://, QR-код и YAML-конфиг клиента
+#   key [NAME]    только ссылка hy2:// одной строкой, для копирования
 #   status        состояние сервиса
 #   uninstall     снести всё
 #
@@ -492,6 +493,22 @@ cmd_show() {
   client_yaml "$name"
 }
 
+# Голая ссылка без единого лишнего символа — чтобы можно было скопировать
+# мышкой или утащить через ssh ... key прямо в буфер.
+cmd_key() {
+  need_root key
+  require_installed
+  local name
+  if [[ $# -gt 0 && -n ${1:-} ]]; then
+    name=$(sanitize_name "$1")
+  else
+    name=$(awk -F'\t' 'NR==1{print $1}' "$USERS_FILE")
+    [[ -n $name ]] || die "В $USERS_FILE нет клиентов"
+  fi
+  client_uri "$name"
+  echo
+}
+
 cmd_status() {
   need_root status
   systemctl status hysteria-server.service --no-pager -l || true
@@ -512,7 +529,7 @@ cmd_uninstall() {
 }
 
 usage() {
-  sed -n '3,14p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '3,15p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 main() {
@@ -524,6 +541,7 @@ main() {
     del|del-client|rm) cmd_del "$@" ;;
     list|list-clients) cmd_list ;;
     show)           cmd_show "$@" ;;
+    key)            cmd_key "$@" ;;
     status)         cmd_status ;;
     uninstall)      cmd_uninstall ;;
     -h|--help|help) usage ;;

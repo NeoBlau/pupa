@@ -252,9 +252,13 @@ socks5:
 http:
   listen: 127.0.0.1:8080
 
-bandwidth:
-  up: 50 mbps
-  down: 200 mbps
+# Раскомментируй, только если точно знаешь скорость своего канала.
+# С этими значениями Hysteria переходит на Brutal congestion control и жмёт
+# ровно столько, сколько тут написано — завысишь, и получишь потери вместо скорости.
+# Пока закомментировано, работает адаптивный BBR, и это правильный выбор по умолчанию.
+# bandwidth:
+#   up: 20 mbps
+#   down: 100 mbps
 EOF
 }
 
@@ -305,7 +309,7 @@ cmd_install() {
   check_os
 
   local domain='' email='' sni='www.bing.com' port=443 ip=''
-  local masq_url='https://www.bing.com/' obfs=1 bbr=1 client_name='indy'
+  local masq_url='https://www.bing.com/' obfs=1 bbr=1 client_name='incy'
 
   while [[ $# -gt 0 ]]; do
     case $1 in

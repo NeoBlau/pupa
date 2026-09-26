@@ -39,13 +39,13 @@ export interface Species3D {
 const TROP_PAC = ["reef_guam", "challenger_deep", "tropical"];
 
 export const SPECIES_3D: Species3D[] = [
-  { id: "clownfish", latin: "Amphiprion sp.", name: { ru: "Рыба-клоун", en: "Clownfish" }, depth: [1, 15], zones: ["reef"], where: ["reef_guam"], group: [1, 2], cruise: 0.2, length: 0.09, light: "neutral", flee: 1.5, density: 3, kind: "asset",
+  { id: "clownfish", latin: "Amphiprion sp.", name: { ru: "Рыба-клоун", en: "Clownfish" }, depth: [1, 15], zones: ["reef"], where: ["reef_guam"], group: [2, 5], cruise: 0.2, length: 0.09, light: "neutral", flee: 1.5, density: 3, kind: "asset",
     source: "FishBase: Amphiprion", fact: { ru: "Живёт в симбиозе с актиниями, слизь защищает её от их стрекательных клеток.", en: "Lives in symbiosis with sea anemones; its mucus protects it from their stinging cells." } },
-  { id: "blue_tang", latin: "Paracanthurus hepatus", name: { ru: "Голубой хирург", en: "Palette surgeonfish" }, depth: [2, 40], zones: ["reef", "shallow"], where: ["reef_guam"], group: [1, 3], cruise: 0.35, length: 0.25, light: "neutral", flee: 3, density: 3, kind: "asset",
+  { id: "blue_tang", latin: "Paracanthurus hepatus", name: { ru: "Голубой хирург", en: "Palette surgeonfish" }, depth: [2, 40], zones: ["reef", "shallow"], where: ["reef_guam"], group: [3, 8], cruise: 0.35, length: 0.25, light: "neutral", flee: 3, density: 3, kind: "asset",
     source: "FishBase: Paracanthurus hepatus", fact: { ru: "У основания хвоста — острый «скальпель», отсюда название «хирург».", en: "A scalpel-like spine at the tail base gives surgeonfish their name." } },
-  { id: "yellow_tang", latin: "Zebrasoma flavescens", name: { ru: "Жёлтый хирург", en: "Yellow tang" }, depth: [2, 46], zones: ["reef", "shallow"], where: ["reef_guam"], group: [1, 3], cruise: 0.3, length: 0.18, light: "neutral", flee: 3, density: 3, kind: "asset",
+  { id: "yellow_tang", latin: "Zebrasoma flavescens", name: { ru: "Жёлтый хирург", en: "Yellow tang" }, depth: [2, 46], zones: ["reef", "shallow"], where: ["reef_guam"], group: [3, 8], cruise: 0.3, length: 0.18, light: "neutral", flee: 3, density: 3, kind: "asset",
     source: "FishBase: Zebrasoma flavescens", fact: { ru: "Травоядна: объедает водоросли с кораллов и этим помогает рифу.", en: "Grazes algae off coral, helping keep the reef healthy." } },
-  { id: "moorish_idol", latin: "Zanclus cornutus", name: { ru: "Мавританский идол", en: "Moorish idol" }, depth: [3, 180], zones: ["reef"], where: ["reef_guam"], group: [1, 2], cruise: 0.3, length: 0.2, light: "neutral", flee: 3, density: 2, kind: "asset",
+  { id: "moorish_idol", latin: "Zanclus cornutus", name: { ru: "Мавританский идол", en: "Moorish idol" }, depth: [3, 180], zones: ["reef"], where: ["reef_guam"], group: [2, 3], cruise: 0.3, length: 0.2, light: "neutral", flee: 3, density: 2, kind: "asset",
     source: "FishBase: Zanclus cornutus", fact: { ru: "Единственный вид своего семейства; длинный спинной плавник тянется шлейфом.", en: "Sole member of its family; the dorsal fin trails like a pennant." } },
   { id: "snapper", latin: "Lutjanidae", name: { ru: "Луцианы (стая)", en: "Snappers (school)" }, depth: [0, 180], zones: ["reef", "shallow", "wreck"], where: ["reef_guam", "gulf_stream", "tropical"], group: [10, 24], cruise: 0.5, length: 0.45, light: "avoid", flee: 5, density: 2, kind: "asset",
     source: "FishBase: Lutjanidae", fact: { ru: "Днём держатся стаями у рифов и обломков судов, ночью охотятся поодиночке.", en: "School around reefs and wrecks by day, hunt alone at night." } },
@@ -120,10 +120,10 @@ export class Ecosystem {
     if (sp.kind !== "asset") return Promise.resolve(null);
     if (!this.prefabs.has(sp.id)) {
       const map: Record<string, () => Promise<Prefab>> = {
-        clownfish: () => prefab("reef_fish", { meshIndex: REEF_MESHES.clownfish, length: sp.length * 3 }),
-        blue_tang: () => prefab("reef_fish", { meshIndex: REEF_MESHES.blue_tang, length: sp.length * 3 }),
-        yellow_tang: () => prefab("reef_fish", { meshIndex: REEF_MESHES.yellow_tang, length: sp.length * 3 }),
-        moorish_idol: () => prefab("reef_fish", { meshIndex: REEF_MESHES.moorish_idol, length: sp.length * 3 }),
+        clownfish: () => prefab("reef_fish", { meshIndex: REEF_MESHES.clownfish, length: sp.length, single: true }),
+        blue_tang: () => prefab("reef_fish", { meshIndex: REEF_MESHES.blue_tang, length: sp.length, single: true }),
+        yellow_tang: () => prefab("reef_fish", { meshIndex: REEF_MESHES.yellow_tang, length: sp.length, single: true }),
+        moorish_idol: () => prefab("reef_fish", { meshIndex: REEF_MESHES.moorish_idol, length: sp.length, single: true }),
         snapper: () => prefab("grey_snapper", { length: sp.length }),
         barramundi: () => prefab("barramundi", { length: sp.length }),
         reef_shark: () => prefab("shark", { length: sp.length }),
@@ -245,7 +245,7 @@ export class Ecosystem {
         let r = Math.random() * total, pick = cands[0];
         for (let i = 0; i < cands.length; i++) { r -= weights[i]; if (r <= 0) { pick = cands[i]; break; } }
         const ang = Math.random() * Math.PI * 2;
-        const dist = 25 + Math.random() * 45;
+        const dist = 10 + Math.random() * 25; // within underwater visibility (≈ 4.8/c ≈ 30 m in clear water)
         const c = craft.pos.clone().add(new THREE.Vector3(Math.cos(ang) * dist, 0, Math.sin(ang) * dist));
         const fl = this.world.floor(c.x, c.z);
         const d = Math.min(Math.max(pick.depth[0], camDepth + (Math.random() - 0.5) * 20), Math.min(pick.depth[1], fl - 1.5));

@@ -17,39 +17,42 @@ export function loadModel(id: string, base = import.meta.env.BASE_URL): Promise<
   return cache.get(id)!;
 }
 
-/** Bounding box of an object in its own frame, skinned meshes in bind pose. */
-function localBox(root: THREE.Object3D): THREE.Box3 {
+/**
+ * Visit every rendered vertex of visible meshes in the root's frame. Uses
+ * Mesh.getVertexPosition, which applies skinning, so skinned models (whose
+ * raw attributes are in bone space) are measured as they are drawn.
+ */
+function eachVertex(root: THREE.Object3D, stride: number, fn: (v: THREE.Vector3) => void) {
   root.updateMatrixWorld(true);
   const inv = new THREE.Matrix4().copy(root.matrixWorld).invert();
-  const box = new THREE.Box3();
   const v = new THREE.Vector3();
   root.traverse((o) => {
     const m = o as THREE.Mesh;
     if (!m.isMesh || !m.visible) return;
-    const pos = m.geometry.getAttribute("position");
+    if ((m as THREE.SkinnedMesh).isSkinnedMesh) (m as THREE.SkinnedMesh).skeleton.update();
     const mat = new THREE.Matrix4().multiplyMatrices(inv, m.matrixWorld);
-    for (let i = 0; i < pos.count; i += 3) box.expandByPoint(v.fromBufferAttribute(pos, i).applyMatrix4(mat));
+    const n = m.geometry.getAttribute("position").count;
+    for (let i = 0; i < n; i += stride) {
+      m.getVertexPosition(i, v);
+      fn(v.applyMatrix4(mat));
+    }
   });
+}
+
+function localBox(root: THREE.Object3D): THREE.Box3 {
+  const box = new THREE.Box3();
+  eachVertex(root, 3, (v) => box.expandByPoint(v));
   return box;
 }
 
 /** Which end along `axis` is thicker (the head, for fish and turtles). */
 function thickEnd(root: THREE.Object3D, axis: "x" | "z", box: THREE.Box3): 1 | -1 {
-  const inv = new THREE.Matrix4().copy(root.matrixWorld).invert();
   const c = box.getCenter(new THREE.Vector3());
   const other = axis === "x" ? "z" : "x";
   let pos = 0, neg = 0, np = 0, nn = 0;
-  const v = new THREE.Vector3();
-  root.traverse((o) => {
-    const m = o as THREE.Mesh;
-    if (!m.isMesh || !m.visible) return;
-    const a = m.geometry.getAttribute("position");
-    const mat = new THREE.Matrix4().multiplyMatrices(inv, m.matrixWorld);
-    for (let i = 0; i < a.count; i += 2) {
-      v.fromBufferAttribute(a, i).applyMatrix4(mat);
-      const girth = Math.abs(v.y - c.y) + Math.abs(v[other] - c[other]);
-      if (v[axis] > c[axis]) { pos += girth; np++; } else { neg += girth; nn++; }
-    }
+  eachVertex(root, 2, (v) => {
+    const girth = Math.abs(v.y - c.y) + Math.abs(v[other] - c[other]);
+    if (v[axis] > c[axis]) { pos += girth; np++; } else { neg += girth; nn++; }
   });
   return pos / Math.max(np, 1) >= neg / Math.max(nn, 1) ? 1 : -1;
 }
@@ -68,6 +71,34 @@ export interface PrefabOptions {
   /** Extra rotation after normalisation (radians about X, Y, Z). */
   extra?: [number, number, number];
   tint?: number;
+  /** The mesh holds several rigged individuals: keep only the first (by bone-name prefix). */
+  single?: boolean;
+}
+
+/**
+ * Keep only the triangles skinned to the first individual of a multi-fish mesh
+ * (bones are named "<Name>1:…", "<Name>2:…"). Returns a new index buffer.
+ */
+function firstIndividual(mesh: THREE.SkinnedMesh) {
+  const g = mesh.geometry;
+  const joints = g.getAttribute("skinIndex");
+  const weights = g.getAttribute("skinWeight");
+  const bones = mesh.skeleton.bones;
+  const prefixOf = (i: number) => {
+    let best = 0, bw = -1;
+    for (let k = 0; k < 4; k++) { const w = weights.getComponent(i, k); if (w > bw) { bw = w; best = joints.getComponent(i, k); } }
+    const name = bones[best]?.name ?? "";
+    return name.includes(":") ? name.split(":")[0] : name;
+  };
+  const target = prefixOf(0);
+  const idx = g.index ? Array.from(g.index.array as ArrayLike<number>) : Array.from({ length: g.getAttribute("position").count }, (_, i) => i);
+  const keep: number[] = [];
+  for (let t = 0; t < idx.length; t += 3) {
+    if (prefixOf(idx[t]) === target) keep.push(idx[t], idx[t + 1], idx[t + 2]);
+  }
+  const ng = g.clone();
+  ng.setIndex(keep);
+  mesh.geometry = ng;
 }
 
 export async function prefab(id: string, o: PrefabOptions): Promise<Prefab> {
@@ -79,6 +110,8 @@ export async function prefab(id: string, o: PrefabOptions): Promise<Prefab> {
   const meshes: THREE.Object3D[] = [];
   probe.traverse((x) => { if ((x as THREE.Mesh).isMesh) meshes.push(x); });
   if (o.meshIndex !== undefined) meshes.forEach((m, i) => (m.visible = i === o.meshIndex));
+  const singleGeo = new Map<number, THREE.BufferGeometry>();
+  if (o.single) meshes.forEach((m, i) => { if (m.visible && (m as THREE.SkinnedMesh).isSkinnedMesh) { firstIndividual(m as THREE.SkinnedMesh); singleGeo.set(i, (m as THREE.Mesh).geometry); } });
   const box = localBox(probe);
   const size = box.getSize(new THREE.Vector3());
   const axis: "x" | "z" = size.x >= size.z ? "x" : "z";
@@ -96,6 +129,7 @@ export async function prefab(id: string, o: PrefabOptions): Promise<Prefab> {
       const list: THREE.Object3D[] = [];
       inst.traverse((x) => { if ((x as THREE.Mesh).isMesh) list.push(x); });
       if (o.meshIndex !== undefined) list.forEach((m, i) => (m.visible = i === o.meshIndex));
+      singleGeo.forEach((geo, i) => ((list[i] as THREE.Mesh).geometry = geo));
       inst.traverse((x) => {
         const m = x as THREE.Mesh;
         if (!m.isMesh) return;

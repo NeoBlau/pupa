@@ -2,6 +2,7 @@ import { getLang, onLang, setLang, tr, type Lang } from "./i18n";
 import { DiveMode } from "./modes/dive";
 import { MapMode } from "./modes/map";
 import { LabMode } from "./modes/lab";
+import { SPECIES_3D } from "./render/life/ecosystem";
 
 type Mode = "dive" | "map" | "lab";
 
@@ -88,4 +89,4 @@ setWarp(10);
 setMode("map");
 
 // Read-only handle for automated browser checks and power users (console).
-(window as unknown as { oceanSim: unknown }).oceanSim = { dive };
+(window as unknown as { oceanSim: unknown }).oceanSim = { dive, species: SPECIES_3D };

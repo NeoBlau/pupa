@@ -54,6 +54,8 @@ export class World {
   private sky = new Sky();
   private sun = new THREE.DirectionalLight(0xffffff, 3);
   private hemi = new THREE.HemisphereLight(0xffffff, 0x223344, 1);
+  /** Outside view: lights of a virtual companion vehicle filming the craft (on only in the dark). */
+  private companion = new THREE.PointLight(0xe6eeff, 0, 60, 1.4);
   private surface!: SeaSurface;
   private waterline!: Waterline;
   private shafts: LightShafts;
@@ -88,6 +90,8 @@ export class World {
     this.scene.add(this.sky, this.sun, this.sun.target, this.hemi);
     this.shafts = new LightShafts(new THREE.TextureLoader().load(`${import.meta.env.BASE_URL}textures/godray.webp`));
     this.scene.add(this.shafts.group, this.particles.group);
+    this.camera.add(this.companion);
+    this.companion.position.set(0.5, 1, 0);
   }
 
   resize() {
@@ -304,6 +308,11 @@ export class World {
     // upwelling light (irradiance reflectance of the ocean ≈ 2–5 %, stronger over sand) fills from below
     this.hemi.groundColor.copy(under ? scatter.clone().multiplyScalar(0.8) : new THREE.Color(0x2a3a4a));
     this.hemi.intensity = under ? 3.2 * bright : 1.2 * day + 0.02;
+    this.companion.intensity = this.camMode === "third" ? 40 * (1 - bright) : 0;
+    for (const l of this.model.lights) {
+      const beam = l.getObjectByName("beam") as THREE.Mesh;
+      (beam.material as THREE.ShaderMaterial).uniforms.uOn.value = ctl.lights && s.z > 3 ? 1 + 2.5 * (1 - bright) : 0;
+    }
     // surface & transition
     this.surface.update(this.camera, s.t);
     (this.surface.uniforms.uSkyZenith.value as THREE.Color).setRGB(0.16, 0.35, 0.75).multiplyScalar(Math.min(1, day * 2));

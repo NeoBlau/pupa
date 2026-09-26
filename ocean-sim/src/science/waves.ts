@@ -45,6 +45,21 @@ export function jonswap(omega: number, U10: number, fetch: number, gamma = 3.3):
   return ((alpha * G * G) / Math.pow(omega, 5)) * Math.exp(-1.25 * Math.pow(wp / omega, 4)) * Math.pow(gamma, r);
 }
 
+/**
+ * Sea state for wind U10 and fetch F. JONSWAP applies while its peak
+ * frequency is above the Pierson–Moskowitz peak (0.877·g/U19.5); beyond that
+ * the sea is fully developed and P–M is used, so a fetch-limited sea can never
+ * exceed the fully developed one.
+ */
+export function seaState(U10: number, fetch: number) {
+  const U195 = 1.026 * U10; // neutral log profile, z0 ≈ 1e-4 m
+  const wpJ = 22 * Math.pow((G * G) / (U10 * fetch), 1 / 3);
+  const wpPM = (0.877 * G) / U195;
+  const fullyDeveloped = wpJ <= wpPM;
+  const S = fullyDeveloped ? (w: number) => piersonMoskowitz(w, U195) : (w: number) => jonswap(w, U10, fetch);
+  return { S, fullyDeveloped, U195, ...spectrumStats(S) };
+}
+
 /** Spectral moments → significant wave height Hs = 4√m0 and peak period. */
 export function spectrumStats(S: (w: number) => number, wMin = 0.05, wMax = 6, n = 4000) {
   let m0 = 0, peakW = wMin, peakS = 0;

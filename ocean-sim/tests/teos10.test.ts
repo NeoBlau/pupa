@@ -54,3 +54,15 @@ describe("physical sanity", () => {
     expect(t10.soundSpeedMackenzie(25, 35, 1000)).toBeCloseTo(1550.744, 2);
   });
 });
+
+import { adiabaticRise } from "../src/data/profile";
+describe("hadal adiabatic extension (browser fallback)", () => {
+  it("matches gsw.t_from_CT within 0.03 °C down to 10 935 m", () => {
+    for (const h of ref.hadal) {
+      h.z.forEach((z, i) => {
+        const approx = h.t[0] + adiabaticRise(h.z[0], z, h.CT);
+        expect(Math.abs(approx - h.t[i])).toBeLessThan(0.03);
+      });
+    }
+  });
+});

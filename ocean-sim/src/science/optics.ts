@@ -45,8 +45,8 @@ export function kdPAR(chl: number): number {
   return 0.0864 + 0.884 * k - 0.00137 / k;
 }
 
-/** Depth of 1 % surface PAR, the conventional euphotic depth [m]. */
-export function euphoticDepth(chl: number): number {
+/** Euphotic depth from Morel's Kd(PAR): 4.6/Kd(PAR). Valid for the first optical depth only. */
+export function euphoticDepthMorel(chl: number): number {
   return Math.log(100) / kdPAR(chl);
 }
 
@@ -71,6 +71,19 @@ export function solarShape(lambdaNm: number, T = 5772): number {
 export function irradianceSpectrum(z: number, chl: number, surface = 1): number[] {
   const kd = kdSpectrum(chl);
   return WAVELENGTHS.map((l, i) => surface * solarShape(l) * Math.exp(-kd[i] * Math.max(z, 0)));
+}
+
+/**
+ * Depth of 1 % surface PAR from the spectral model. Deeper than the Kd(PAR)
+ * estimate because light becomes bluer (less attenuated) with depth.
+ */
+export function euphoticDepth(chl: number): number {
+  let lo = 0, hi = 1000;
+  for (let i = 0; i < 60; i++) {
+    const mid = (lo + hi) / 2;
+    if (parFraction(mid, chl) > 0.01) lo = mid; else hi = mid;
+  }
+  return (lo + hi) / 2;
 }
 
 /** Fraction of surface PAR remaining at depth z (spectrally resolved, 400–700 nm). */

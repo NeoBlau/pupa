@@ -39,5 +39,12 @@ n2, p_mid = gsw.Nsquared(sa_col, ct_col, p_col, lat=30.0)
 nsq = {"lat": 30.0, "p": p_col.tolist(), "SA": sa_col.tolist(), "CT": ct_col.tolist(),
        "N2": n2.tolist(), "p_mid": p_mid.tolist()}
 
+# Adiabatic hadal extension: t(z) at constant SA, CT below 5500 m
+hadal = []
+for sa, ct, lat in [(34.88, 1.02, 11.37), (34.81, -0.8, -65.0), (34.9, 2.0, 30.0), (34.7, 1.5, -30.0)]:
+    zs = [5500.0, 7000.0, 9000.0, 10935.0]
+    ts = [float(gsw.t_from_CT(sa, ct, gsw.p_from_z(-z, lat))) for z in zs]
+    hadal.append({"SA": sa, "CT": ct, "lat": lat, "z": zs, "t": ts})
+
 print(json.dumps({"gsw_version": gsw.__version__, "cases": cases, "depth": depth,
-                  "freezing": freezing, "nsquared": nsq}))
+                  "freezing": freezing, "nsquared": nsq, "hadal": hadal}))

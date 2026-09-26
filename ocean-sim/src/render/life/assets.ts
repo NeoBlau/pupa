@@ -13,7 +13,8 @@ loader.setMeshoptDecoder(MeshoptDecoder);
 const cache = new Map<string, Promise<GLTF>>();
 
 export function loadModel(id: string, base = import.meta.env.BASE_URL): Promise<GLTF> {
-  if (!cache.has(id)) cache.set(id, loader.loadAsync(`${base}models/${id}.glb`));
+  const ext = import.meta.env.VITE_MODEL_EXT ?? "glb";
+  if (!cache.has(id)) cache.set(id, loader.loadAsync(`${base}models/${id}.${ext}`));
   return cache.get(id)!;
 }
 

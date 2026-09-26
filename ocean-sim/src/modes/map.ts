@@ -138,7 +138,7 @@ export class MapMode {
       // Prefer WOA23 for ocean missions once prepared; lakes are not in WOA.
       const month = +$<HTMLSelectElement>("month").value;
       const woa = m.id === "baikal" ? null : await columnAt(lat, lon, month);
-      column = woa && woa.source.startsWith("WOA23") ? woa : fb.missions[m.id];
+      column = woa && woa.source.startsWith("WOA23") ? woa : fb.missions[m.profileFrom ?? m.id];
     } else {
       ({ lat, lon } = this.pick);
       const b = this.pointBottom(lat, lon);
@@ -148,6 +148,6 @@ export class MapMode {
       column = await columnAt(lat, lon, +$<HTMLSelectElement>("month").value);
       label = `${lat.toFixed(2)}, ${lon.toFixed(2)}`;
     }
-    this.onStart({ lat, lon, bottom, chl, missionId, vehicleId, column, wind: 8, label });
+    this.onStart({ lat, lon, bottom, chl, missionId, vehicleId, column, wind: 8, label, month: +$<HTMLSelectElement>("month").value });
   }
 }

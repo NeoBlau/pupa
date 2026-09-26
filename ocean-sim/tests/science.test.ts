@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { euphoticDepth, euphoticDepthMorel, kd490, parFraction, waterColour } from "../src/science/optics";
+import { euphoticDepth, euphoticDepthMorel, kd490, parFraction, veilingColour, waterColour } from "../src/science/optics";
 import { ekman, jonswap, piersonMoskowitz, seaState, spectrumStats, wavenumber } from "../src/science/waves";
 import { candidates, SPECIES } from "../src/data/species";
 
@@ -12,6 +12,12 @@ describe("optics", () => {
     for (let z = 5; z < 300; z += 5) { const f = parFraction(z, 0.2); expect(f).toBeLessThan(prev); prev = f; }
     expect(parFraction(euphoticDepth(0.2), 0.2)).toBeCloseTo(0.01, 4);
     expect(euphoticDepth(0.2)).toBeGreaterThan(euphoticDepthMorel(0.2));
+  });
+  it("veiling light of the water body is blue even 1 m below the surface (b_w ∝ λ^−4.32)", () => {
+    const { rgb } = veilingColour(1, 0.05);
+    expect(rgb[2]).toBeGreaterThan(rgb[1]);
+    expect(rgb[1]).toBeGreaterThan(rgb[0]);
+    expect(rgb[0]).toBeLessThan(0.3);
   });
   it("more chlorophyll → shallower euphotic zone", () => {
     expect(euphoticDepth(2)).toBeLessThan(euphoticDepth(0.05));

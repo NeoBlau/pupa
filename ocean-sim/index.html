@@ -36,13 +36,23 @@
               <div class="hud-depth"><span id="hud-depth">0</span><small> m</small></div>
               <div id="hud-sub" class="hud-sub"></div>
               <div id="hud-alert" class="hud-alert" hidden></div>
+              <div id="hud-gamepad" class="hud-gamepad"></div>
             </div>
+            <div id="hud-flash" class="hud-flash" hidden></div>
+            <div id="hud-loading" class="hud-loading" hidden data-t="loading"></div>
             <div id="encounter" class="encounter" hidden></div>
+
+          </div>
+          <div class="control-bar">
             <div class="controls">
               <label><span data-t="vb"></span> <input id="vb" type="range" min="0" max="1" step="0.01" value="0.5" /> <output id="vb-out"></output></label>
               <button id="drop" data-t="dropWeights"></button>
+              <button id="tanks"></button>
+              <button id="hold" data-t="depthHold" aria-pressed="false"></button>
               <button id="emerg" class="danger" data-t="emergency"></button>
               <button id="lights" data-t="lights" aria-pressed="true"></button>
+              <button id="scan" data-t="interact"></button>
+              <button id="cam-toggle"></button>
               <button id="photo" data-t="photo"></button>
               <div class="pad">
                 <button data-thr="0,1">▲</button><button data-thr="-1,0">◀</button><button data-thr="1,0">▶</button><button data-thr="0,-1">▼</button>
@@ -53,6 +63,7 @@
           <aside class="instruments">
             <div class="source-line"><span data-t="dataSource"></span>: <span id="data-src"></span></div>
             <table id="readings"></table>
+            <details class="credits"><summary data-t="credits"></summary><ul id="credits"></ul></details>
             <div class="exports">
               <button id="exp-ctd" data-t="exportCTD"></button>
               <button id="exp-log" data-t="exportLog"></button>

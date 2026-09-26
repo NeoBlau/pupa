@@ -28,9 +28,24 @@ export interface Vehicle {
   descentWeights: number;
   /** Variable ballast capacity [kg of seawater]. */
   variableBallast: number;
-  thrust: number; // N, total horizontal
   cdVertical: number;
   lightsW: number;
+  /** Maximum horizontal speed [m/s]; forward thrust is sized to reach it against drag. */
+  maxSpeed: number;
+  /** Total vertical thruster force [N] (0 = no vertical thrusters). */
+  verticalThrust: number;
+  /** Maximum yaw rate [°/s] — manoeuvrability. */
+  yawRate: number;
+  /** Usable battery energy [kWh]. */
+  battery: number;
+  /** Life support, instruments, computers [kW]. */
+  hotelLoad: number;
+  /** Electrical power of all thrusters at full command [kW]. */
+  thrusterPower: number;
+  /** Collapse depth as a multiple of the rated depth (hull strength). */
+  collapseFactor: number;
+  /** true for a fictional design (numbers are design targets, not measurements). */
+  concept?: boolean;
   notes: { ru: string; en: string };
   sources: string[];
 }
@@ -55,7 +70,13 @@ export const VEHICLES: Vehicle[] = [
     ascentSpeed: 10916 / (3 * 3600 + 15 * 60), // 3 h 15 min (src)
     descentWeights: 9000, // ≈ 9 t iron shot in two hoppers (src)
     variableBallast: 0,
-    thrust: 1200,
+    maxSpeed: 0.5, // ≈ 1 kn (est)
+    verticalThrust: 0, // none: depth controlled by shot and gasoline only
+    yawRate: 2, // (est)
+    battery: 40, // lead-acid (est)
+    hotelLoad: 1.0,
+    thrusterPower: 6,
+    collapseFactor: 1.5,
     cdVertical: 1.1,
     lightsW: 1500,
     notes: {
@@ -80,7 +101,13 @@ export const VEHICLES: Vehicle[] = [
     ascentSpeed: 30 / 60,
     descentWeights: 450, // steel descent weights (est)
     variableBallast: 400,
-    thrust: 2400,
+    maxSpeed: 1.0, // 2 kn (src: WHOI)
+    verticalThrust: 2000, // (est)
+    yawRate: 12, // (est)
+    battery: 90, // Li-ion (est)
+    hotelLoad: 2.0,
+    thrusterPower: 30, // (est)
+    collapseFactor: 1.5,
     cdVertical: 1.0,
     lightsW: 2000,
     notes: {
@@ -105,7 +132,13 @@ export const VEHICLES: Vehicle[] = [
     ascentSpeed: 10925 / (4 * 3600),
     descentWeights: 300, // (est)
     variableBallast: 200,
-    thrust: 1600,
+    maxSpeed: 1.3, // (est)
+    verticalThrust: 1500, // (est)
+    yawRate: 10, // (est)
+    battery: 60, // (est)
+    hotelLoad: 1.5,
+    thrusterPower: 20, // (est)
+    collapseFactor: 1.5,
     cdVertical: 0.9,
     lightsW: 1200,
     notes: {
@@ -130,7 +163,13 @@ export const VEHICLES: Vehicle[] = [
     ascentSpeed: 0.6,
     descentWeights: 400,
     variableBallast: 290,
-    thrust: 2000,
+    maxSpeed: 2.0, // (est)
+    verticalThrust: 1800, // (est)
+    yawRate: 8, // (est)
+    battery: 100, // (est)
+    hotelLoad: 2.0,
+    thrusterPower: 25, // (est)
+    collapseFactor: 1.5,
     cdVertical: 1.0,
     lightsW: 2000,
     notes: {
@@ -139,7 +178,45 @@ export const VEHICLES: Vehicle[] = [
     },
     sources: ["Shirshov Institute of Oceanology RAS: Mir-1/Mir-2", "Sagalevich A.M. (2008)"],
   },
+  {
+    id: "nereid_x",
+    concept: true,
+    name: { ru: "«Нерей-X» (концепт)", en: "Nereid-X (concept)" },
+    year: "concept",
+    crew: 3,
+    ratedDepth: 11000,
+    mass: 14500,
+    length: 6.4, width: 3.0, height: 2.9,
+    floatVolume: 7.0, // glass-microsphere syntactic foam (design target)
+    floatKappa: 1.2e-10,
+    floatThermal: 0,
+    hullKappa: 1e-11,
+    descentSpeed: 1.3,
+    ascentSpeed: 1.3,
+    descentWeights: 500,
+    variableBallast: 350,
+    cdVertical: 0.7, // streamlined fairing
+    lightsW: 6000,
+    maxSpeed: 2.2,
+    verticalThrust: 6000,
+    yawRate: 30,
+    battery: 250, // solid-state pack (design target)
+    hotelLoad: 3.0,
+    thrusterPower: 80,
+    collapseFactor: 1.8, // titanium–ceramic composite sphere (design target)
+    notes: {
+      ru: "Оригинальный концепт аппарата следующего поколения. Три человека в титаново-керамической сфере с панорамным акриловым куполом. Восемь векторных движителей, сонар, лидар, манипулятор, твердотельная батарея. Самый быстрый и манёвренный, но и самый прожорливый: на полной тяге батареи хватает примерно на 3 часа. Все цифры — проектные, не измерения.",
+      en: "Original next-generation concept. Three crew in a titanium–ceramic sphere with a panoramic acrylic dome; eight vectored thrusters, sonar, lidar, manipulator, solid-state battery. The fastest and most agile craft, and the hungriest: about 3 h at full thrust. All figures are design targets, not measurements.",
+    },
+    sources: ["Original concept for this simulator"],
+  },
 ];
 
 /** Vertical plan area used for drag in heave [m²]. */
-export const planArea = (v: Vehicle) => v.length * v.width * (v.id === "trieste" ? 0.8 : 0.75);
+export const planArea = (v: Vehicle) => v.length * v.width * (v.id === "trieste" ? 0.8 : v.id === "nereid_x" ? 0.7 : 0.75);
+
+/** Frontal area for surge drag [m²]. */
+export const frontArea = (v: Vehicle) => v.width * v.height * 0.8;
+
+/** Forward thrust [N] that balances quadratic drag at maxSpeed: T = ½ρ·Cd·A·U². */
+export const forwardThrust = (v: Vehicle) => 0.5 * 1025 * 0.9 * frontArea(v) * v.maxSpeed * v.maxSpeed;

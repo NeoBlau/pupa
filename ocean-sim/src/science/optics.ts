@@ -146,6 +146,32 @@ export function waterColour(z: number, chl: number): { rgb: [number, number, num
   return { rgb: rgb.map((v) => v / m) as [number, number, number], luminance: xyz[1] / Y0 };
 }
 
+/**
+ * Colour of the veiling (path) light of the water body seen horizontally at
+ * depth z: L(λ) ∝ E_d(λ, z) · b(λ) / c(λ). Pure-seawater scattering
+ * b_w = 0.00288·(λ/500)^−4.32 m⁻¹ (Morel 1974); particles
+ * b_p = 0.30·Chl^0.62·(550/λ) (Morel 1988). Blue even just below the surface.
+ */
+export function veilingColour(z: number, chl: number): { rgb: [number, number, number]; luminance: number } {
+  const E = irradianceSpectrum(z, chl);
+  const E0 = irradianceSpectrum(0, chl);
+  const kbio = kd490(chl) - 0.0166;
+  const acc: [number, number, number] = [0, 0, 0];
+  let Y0 = 0;
+  POPE_FRY_1997.forEach(([l, aw], i) => {
+    const bw = 0.00288 * Math.pow(l / 500, -4.32);
+    const bp = 0.3 * Math.pow(Math.max(chl, 0.01), 0.62) * (550 / l);
+    const b = bw + bp;
+    const ratio = b / (aw + kbio * 0.5 + b);
+    const [x, y, zz] = cie1931(l);
+    acc[0] += E[i] * ratio * x; acc[1] += E[i] * ratio * y; acc[2] += E[i] * ratio * zz;
+    Y0 += E0[i] * y;
+  });
+  const rgb = xyzToLinearRgb(acc).map((v) => Math.max(v, 0)) as [number, number, number];
+  const m = Math.max(...rgb, 1e-30);
+  return { rgb: rgb.map((v) => v / m) as [number, number, number], luminance: acc[1] / Y0 };
+}
+
 /** Classical light zones (by 1 % and ~0 % PAR). */
 export function lightZone(z: number, chl: number): "euphotic" | "dysphotic" | "aphotic" {
   if (z <= euphoticDepth(chl)) return "euphotic";

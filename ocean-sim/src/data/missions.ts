@@ -5,6 +5,8 @@ export interface Mission {
   bottom: number; // m
   vehicle: string;
   chl: number; // surface chlorophyll-a [mg/m³] (typical climatological value)
+  /** Use another mission's water column (same water mass), truncated to this bottom. */
+  profileFrom?: string;
   name: { ru: string; en: string };
   brief: { ru: string; en: string };
   goals: { ru: string[]; en: string[] };
@@ -89,5 +91,18 @@ export const MISSIONS: Mission[] = [
       en: ["Compare fresh vs sea water density", "Meet the golomyanka", "See that Baikal deep water is colder than 4 °C"],
     },
     source: "Shimaraev M.N. et al. (1994) Physical Limnology of Lake Baikal",
+  },
+  {
+    id: "reef_guam", lat: 13.46, lon: 144.62, bottom: 32, vehicle: "nereid_x", chl: 0.08, profileFrom: "challenger_deep",
+    name: { ru: "Риф Гуама: пещера и затонувшее судно", en: "Guam reef: cave and wreck" },
+    brief: {
+      ru: "Внешний риф у Апры (Гуам, Марианские острова), ~30 м. Скалистый риф с кораллами, пещера под скальной аркой и обломки судна. Вода та же, что над Марианским желобом, — очень прозрачная. Модель судна условная, иллюстративная.",
+      en: "Outer reef off Apra, Guam (Mariana Islands), ~30 m. Rocky reef with corals, a cave under a rock arch and a wreck. Same water mass as over the Mariana Trench — very clear. The wreck model is illustrative.",
+    },
+    goals: {
+      ru: ["Отсканировать 5 разных видов (кнопка «Взаимодействие»)", "Проплыть через пещеру, не задев скалы", "Всплыть и снова погрузиться", "Сравнить поглощение красного света на 5 и 30 м"],
+      en: ["Scan 5 different species (Interact button)", "Pass through the cave without touching the rock", "Surface and dive again", "Compare red-light absorption at 5 m and 30 m"],
+    },
+    source: "Paulay G. (2003) Marine biodiversity of Guam and the Marianas, Micronesica 35-36",
   },
 ];

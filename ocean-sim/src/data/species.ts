@@ -201,6 +201,7 @@ export function regionsFor(lat: number, lon: number, missionId?: string): Region
   if (missionId === "challenger_deep") r.push("pacific_trench");
   if (missionId === "tag_vents") r.push("mar_vent");
   if (missionId === "red_sea") r.push("red_sea");
+  if (missionId === "reef_guam") r.push("tropical");
   if (missionId === "gulf_stream" || (lat > 20 && lat < 45 && lon > -80 && lon < -40)) r.push("nw_atlantic");
   return r;
 }

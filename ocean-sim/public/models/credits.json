@@ -1,0 +1,74 @@
+[
+  {
+    "id": "reef_fish",
+    "credit": "Babylon.js Assets — fish.glb (clownfish, blue tang, yellow tang, moorish idol)",
+    "license": "CC-BY-4.0",
+    "url": "https://github.com/BabylonJS/Assets"
+  },
+  {
+    "id": "shark",
+    "credit": "Babylon.js Assets — shark.glb",
+    "license": "CC-BY-4.0",
+    "url": "https://github.com/BabylonJS/Assets"
+  },
+  {
+    "id": "octopus",
+    "credit": "Babylon.js Assets — octopus_customRig.glb",
+    "license": "CC-BY-4.0",
+    "url": "https://github.com/BabylonJS/Assets"
+  },
+  {
+    "id": "grey_snapper",
+    "credit": "Babylon.js Assets — Underwater Scene demo, grey snapper",
+    "license": "CC-BY-4.0",
+    "url": "https://github.com/BabylonJS/Assets"
+  },
+  {
+    "id": "reef_rocks",
+    "credit": "Babylon.js Assets — Underwater Scene demo (rocks, seagrass, boards)",
+    "license": "CC-BY-4.0",
+    "url": "https://github.com/BabylonJS/Assets"
+  },
+  {
+    "id": "barnacle_rocks",
+    "credit": "Babylon.js Assets — Underwater Scene demo (rocks with barnacles and mussels)",
+    "license": "CC-BY-4.0",
+    "url": "https://github.com/BabylonJS/Assets"
+  },
+  {
+    "id": "turtle",
+    "credit": "Model 52A — Kemp's Ridley Sea Turtle, DigitalLife3D (via pmndrs/examples)",
+    "license": "CC-BY-NC-4.0",
+    "url": "https://sketchfab.com/3d-models/model-52a-kemps-ridley-sea-turtle-no-id-7aba937dfbce480fb3aca47be3a9740b"
+  },
+  {
+    "id": "crab",
+    "credit": "Crab — Three D Scans (via gkjohnson/3d-demo-data)",
+    "license": "Three D Scans: free, no restrictions",
+    "url": "https://threedscans.com/"
+  },
+  {
+    "id": "elbow_crab",
+    "credit": "Elbow Crab — Three D Scans (via gkjohnson/3d-demo-data)",
+    "license": "Three D Scans: free, no restrictions",
+    "url": "https://threedscans.com/"
+  },
+  {
+    "id": "barramundi",
+    "credit": "BarramundiFish — Microsoft, Khronos glTF Sample Assets",
+    "license": "CC0-1.0",
+    "url": "https://github.com/KhronosGroup/glTF-Sample-Assets"
+  },
+  {
+    "id": "shipwreck",
+    "credit": "Ship wreck — Kenney Pirate Kit (via pmndrs/market-assets)",
+    "license": "CC0-1.0",
+    "url": "https://kenney.nl/assets/pirate-kit"
+  },
+  {
+    "id": "rock_arch",
+    "credit": "Large rock formation — Kenney Nature Kit (via pmndrs/market-assets)",
+    "license": "CC0-1.0",
+    "url": "https://kenney.nl/assets/nature-kit"
+  }
+]

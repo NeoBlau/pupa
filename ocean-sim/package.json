@@ -1,0 +1,29 @@
+{
+  "name": "ocean-sim",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Scientific deep-ocean simulator: TEOS-10 seawater, real submersibles, WOA23/GEBCO data",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "@gltf-transform/core": "^4.5.0",
+    "@gltf-transform/extensions": "^4.5.0",
+    "@gltf-transform/functions": "^4.5.0",
+    "@types/node": "^26.6.3",
+    "@types/three": "^0.186.0",
+    "draco3dgltf": "^1.5.7",
+    "meshoptimizer": "^1.3.0",
+    "sharp": "^0.35.4",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.1",
+    "vitest": "^5.0.2"
+  }
+}

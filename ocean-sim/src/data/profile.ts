@@ -104,7 +104,29 @@ export async function loadFallback(base = import.meta.env.BASE_URL): Promise<Fal
 }
 
 /** WOA23 tile index written by tools/prepare_woa.py (absent until data is prepared). */
-interface WoaIndex { tileDeg: number; levels: number[]; vars: string[]; scale: Record<string, [number, number]>; tiles: string[]; month: number }
+interface WoaIndex {
+  tileDeg: number; levels: number[]; vars: string[]; scale: Record<string, [number, number]>; tiles: string[]; month: number;
+  /** tile key → [band file, byte offset, byte length] */
+  bands?: Record<string, [string, number, number]>;
+}
+
+const bandCache = new Map<string, Promise<ArrayBuffer | null>>();
+
+/**
+ * Fetch a binary data file. Hosts that do not serve .bin get the same bytes as
+ * base64 in a .json file (tools/embed_data.mjs; build with VITE_DATA_EXT=json).
+ */
+export async function fetchBinary(pathNoExt: string): Promise<ArrayBuffer | null> {
+  const ext = import.meta.env.VITE_DATA_EXT ?? "bin";
+  const r = await fetch(`${pathNoExt}.${ext}`);
+  if (!r.ok) return null;
+  if (ext === "bin") return r.arrayBuffer();
+  const b64 = ((await r.json()) as { b64: string }).b64;
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out.buffer;
+}
 
 /** public/data/manifest.json lists which prepared datasets exist. */
 export interface Manifest { woa23: boolean; bathy: boolean; woaMonths?: number[] }
@@ -167,9 +189,20 @@ async function woaColumn(idx: WoaIndex, lat: number, lon: number, base: string):
   const tLon = Math.floor((lon + 180) / d) * d - 180;
   const key = `${tLat}_${tLon}`;
   if (!idx.tiles.includes(key)) return null;
-  const r = await fetch(`${base}data/woa23/m${String(idx.month).padStart(2, "0")}/${key}.bin`);
-  if (!r.ok) return null;
-  const cells = decodeTile(new Int16Array(await r.arrayBuffer()), idx);
+  const dir = `${base}data/woa23/m${String(idx.month).padStart(2, "0")}`;
+  let data: Int16Array;
+  if (idx.bands) {
+    const [band, off, len] = idx.bands[key];
+    if (!bandCache.has(dir + band)) bandCache.set(dir + band, fetchBinary(`${dir}/${band}`));
+    const buf = await bandCache.get(dir + band)!;
+    if (!buf) return null;
+    data = new Int16Array(buf, off, len / 2);
+  } else {
+    const buf = await fetchBinary(`${dir}/${key}`);
+    if (!buf) return null;
+    data = new Int16Array(buf);
+  }
+  const cells = decodeTile(data, idx);
   const ci = Math.floor(lat - tLat), cj = Math.floor(lon - tLon);
   // nearest ocean cell (coastlines: the chosen 1° cell may be land in WOA)
   let best = null as (typeof cells)[number] | null, bd = Infinity;

@@ -86,6 +86,7 @@ const dict = {
   speedH: { ru: "Ход", en: "Speed" },
   heading: { ru: "курс", en: "hdg" },
   loading: { ru: "Загрузка моделей…", en: "Loading models…" },
+  monthNote: { ru: "Для этого месяца в проекте подготовлена только годовая климатология WOA23. Месяц меняет высоту солнца, профиль берётся годовой (помесячные данные: tools/prepare_woa.py --month N)", en: "Only the annual WOA23 climatology is prepared; the month sets the sun elevation and the annual profile is used (monthly data: tools/prepare_woa.py --month N)" },
   credits: { ru: "Источники 3D-моделей", en: "3D model credits" },
   labSeawater: { ru: "Морская вода (TEOS-10)", en: "Seawater (TEOS-10)" },
   labWaves: { ru: "Волны и экмановский перенос", en: "Waves and Ekman transport" },

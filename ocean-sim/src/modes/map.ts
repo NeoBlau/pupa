@@ -1,6 +1,6 @@
 import { bathyGrid, bathySource, elevationAt, loadBathy } from "../data/bathy";
 import { MISSIONS, type Mission } from "../data/missions";
-import { columnAt, loadFallback, type Column } from "../data/profile";
+import { columnAt, loadFallback, loadManifest, type Column } from "../data/profile";
 import { VEHICLES } from "../sim/vehicles";
 import { L, tr, trList } from "../i18n";
 import type { DiveSetup } from "./dive";
@@ -25,6 +25,7 @@ export class MapMode {
     window.addEventListener("resize", () => this.draw());
     $("start").addEventListener("click", () => this.start());
     $<HTMLSelectElement>("vehicle").addEventListener("change", () => this.renderVehicleNotes());
+    $<HTMLSelectElement>("month").addEventListener("change", () => this.render());
     loadBathy().then(() => { this.landImage = null; this.render(); });
     this.render();
   }
@@ -50,6 +51,11 @@ export class MapMode {
     }
     this.renderVehicleNotes();
     this.renderPick();
+    loadManifest().then((man) => {
+      const month = +ms.value;
+      const have = !month || (man.woaMonths ?? []).includes(month);
+      $("month-note").textContent = have ? "" : tr("monthNote");
+    });
     $("map-hint").textContent = tr("mapHint") + (bathySource() ? ` · ${bathySource()}` : ` · ${tr("noBathy")}`);
     this.draw();
   }
@@ -110,14 +116,23 @@ export class MapMode {
     for (let lat = -60; lat <= 60; lat += 30) { const y = ((90 - lat) / 180) * h; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
     const P = (lat: number, lon: number) => [((lon + 180) / 360) * w, ((90 - lat) / 180) * h];
     ctx.font = "12px system-ui, sans-serif";
+    const placed: Array<{ x: number; y: number; w: number }> = [];
     for (const m of MISSIONS) {
       const [x, y] = P(m.lat, m.lon);
       const sel = this.pick.kind === "mission" && this.pick.mission.id === m.id;
       ctx.fillStyle = sel ? "#eda100" : "#ffffff";
       ctx.strokeStyle = "#0a1016"; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(x, y, sel ? 6 : 4.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      // label: flip to the left near the right edge, step down while it overlaps another label
+      const text = L(m.name).split(",")[0].split(":")[0];
+      const tw = ctx.measureText(text).width;
+      const lx = x + 8 + tw > w - 4 ? x - 8 - tw : x + 8;
+      let ly = y + 4;
+      while (placed.some((p) => Math.abs(p.y - ly) < 14 && lx < p.x + p.w && lx + tw > p.x)) ly += 14;
+      placed.push({ x: lx, y: ly, w: tw });
+      ctx.lineWidth = 3; ctx.strokeStyle = "rgba(10,16,22,0.8)"; ctx.strokeText(text, lx, ly);
       ctx.fillStyle = "#f2f5f7";
-      ctx.fillText(L(m.name).split(",")[0], x + 8, y + 4);
+      ctx.fillText(text, lx, ly);
     }
     if (this.pick.kind === "point") {
       const [x, y] = P(this.pick.lat, this.pick.lon);

@@ -147,9 +147,25 @@ def main():
             tiles.append(key)
             print("tile", key, len(cells), "cells")
 
+    # Bundle tiles into one file per 10° latitude band (fewer files to host);
+    # index.bands maps each tile key to [band file, byte offset, byte length].
+    bands = {}
+    for key in tiles:
+        lat0 = key.split("_")[0]
+        f = out / f"{key}.bin"
+        data = f.read_bytes()
+        name = f"band_{lat0}"
+        buf = bands.setdefault(name, bytearray())
+        bands.setdefault("_map", {})[key] = [name, len(buf), len(data)]
+        buf += data
+        f.unlink()
+    index_map = bands.pop("_map")
+    for name, buf in bands.items():
+        (out / f"{name}.bin").write_bytes(bytes(buf))
     (out / "index.json").write_text(json.dumps({
         "tileDeg": TILE, "levels": levels.tolist(), "vars": VARS,
         "scale": {k: list(v) for k, v in SCALE.items()}, "tiles": tiles, "month": month,
+        "bands": index_map,
         "source": "WOA23 1° (Reagan et al. 2024), TEOS-10 via gsw",
     }))
     man_path = Path(args.out) / "manifest.json"

@@ -3,7 +3,7 @@
  * GEBCO. Int16 elevation in metres (negative = below sea level), row 0 at the
  * north edge, column 0 at 180°W.
  */
-import { loadManifest } from "./profile";
+import { fetchBinary, loadManifest } from "./profile";
 
 interface BathyIndex { width: number; height: number; res: number; source: string }
 
@@ -16,7 +16,8 @@ export async function loadBathy(base = import.meta.env.BASE_URL) {
     const r = await fetch(`${base}data/bathy/index.json`);
     if (!r.ok) throw new Error("absent");
     const idx = (await r.json()) as BathyIndex;
-    const buf = await (await fetch(`${base}data/bathy/global.bin`)).arrayBuffer();
+    const buf = await fetchBinary(`${base}data/bathy/global`);
+    if (!buf) throw new Error("absent");
     grid = { idx, data: new Int16Array(buf) };
   } catch {
     grid = null;

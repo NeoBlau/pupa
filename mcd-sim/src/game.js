@@ -14,18 +14,21 @@ import { World } from './world/world.js';
 import { platformsOf, loadStationProps } from './world/station.js';
 import { loadScenery } from './world/scenery.js';
 import { loadPeople, Crowd } from './world/people.js';
+import { loadSignalModel } from './core/realModels.js';
 import { TrainModel } from './train/trainModel.js';
 import { Cab } from './train/cab.js';
 import { CameraRig } from './player/cameras.js';
 import { audio } from './audio/audio.js';
-import { TRAINS } from './data/trains.js';
+import { TRAINS, consistLength } from './data/trains.js';
 import LINES from './data/lines.json';
 
 let commonLoaded = null;
 export function loadCommon(renderer, progress) {
   if (!commonLoaded) {
     commonLoaded = (async () => {
-      progress?.('Модели окружения (Poly Haven)…', 0.1);
+      progress?.('Светофоры и дома (Sketchfab)…', 0.05);
+      await loadSignalModel();
+      progress?.('Модели окружения (Poly Haven, Sketchfab)…', 0.1);
       await loadScenery(renderer);
       progress?.('Реквизит станций…', 0.4);
       await loadStationProps();
@@ -80,7 +83,7 @@ export class Game {
     }
     this.env.time = startTime;
     this.trackPos = dir;
-    const len = spec.carLength * cfg.cars;
+    const len = consistLength(spec, cfg.cars);
     this.sim = new TrainSim(spec, cfg.cars, { s: startStation.s + dir * len / 2, dir });
     this.sim.reverser = 0; this.sim.lever = -0.7; this.sim.km = 0; this.sim.kran = 4;
     if (spec.controller === 'separate') { this.sim.brakePipe = 4.3; this.sim.brakeCyl = 1.7; } else this.sim.brakeCyl = 2.6;
@@ -97,11 +100,11 @@ export class Game {
     await this.model.build();
     this.scene.add(this.model.group);
     this.cab = new Cab(spec);
-    await this.cab.build(this.model.cars[0]);
+    await this.cab.build(this.model.cars[0], this.model);
     this.rig = new CameraRig(this.camera, this);
     this.crowd = new Crowd(this.scene, route);
     const allRuns = [...this.runs[1], ...this.runs[-1]];
-    this.traffic = new Traffic(this.scene, route, this.signals, allRuns, this.run?.id, (run) => (run.dir === dir ? spec : TRAINS[this.line.id === 'D2' || this.line.id === 'D4' ? 'eg2tv' : 'es2g']));
+    this.traffic = new Traffic(this.scene, route, this.signals, allRuns, this.run?.id, (run) => (run.dir === dir ? spec : TRAINS.es2g));
     // состояние остановок
     this.stopState = { stoppedAt: null, arrivedIdx: -1, departedIdx: -1, announcedNext: -1, populated: -1 };
     if (cfg.mode === 'schedule') {
@@ -149,21 +152,17 @@ export class Game {
     this.crowd.populate(st, platformsOf(this.route, st), this.env.time);
   }
 
-  // Двери: есть ли открытая дверь у позиции ds (от головы назад) на стороне side
+  // Двери: есть ли открытая дверь у позиции ds (м от головы назад) на стороне side
   doorAt(ds, side, tol = 0.8) {
     const sim = this.sim;
     if (sim.doors[side] < 0.8) return false;
-    const L = sim.spec.carLength;
     if (ds < 0 || ds > sim.length) return false;
-    const i = Math.floor(ds / L), local = ds - i * L - L / 2; // от центра вагона, + назад
-    const car = this.model.cars[i];
-    if (!car || !car.userData.doors) return false;
-    const flip = this.model.flipped[i];
-    const arr = car.userData.doors[(side === 'left') !== flip ? 'left' : 'right'];
-    for (const leaf of arr) {
-      const z = (car.userData.body?.position.z || 0) + leaf.userData.base.z * 1;
-      const zc = flip ? -z : z; // +z в вагоне — назад по ходу
-      if (Math.abs(zc - local) < this.spec.doorWidth / 2 + tol - 0.4) return true;
+    const m = this.model;
+    for (let i = 0; i < m.cars.length; i++) {
+      const c = m.carCenter(i), L = m.lens[i];
+      if (Math.abs(ds - c) > L / 2) continue;
+      const local = ds - c;
+      for (const dz of [-L / 4, L / 4]) if (Math.abs(local - dz) < this.spec.doorWidth / 2 + tol - 0.4) return true;
     }
     return false;
   }
@@ -172,17 +171,13 @@ export class Game {
     const sim = this.sim, pts = [];
     const side = sim.doors.left > 0.8 ? -1 : sim.doors.right > 0.8 ? 1 : 0;
     if (!side) return pts;
-    this.model.cars.forEach((car, i) => {
-      const flip = this.model.flipped[i];
-      const arr = car.userData.doors?.[side < 0 !== flip ? 'left' : 'right'] || [];
-      for (const leaf of arr) {
-        if (leaf.userData.lr !== 1) continue;
-        const z = (car.userData.body?.position.z || 0) + leaf.userData.base.z - this.spec.doorWidth / 4;
-        const ds = i * this.spec.carLength + this.spec.carLength / 2 + (flip ? -z : z);
-        const s = sim.s - sim.dir * ds;
+    const m = this.model;
+    for (let i = 0; i < m.cars.length; i++) {
+      for (const dz of [-m.lens[i] / 4, m.lens[i] / 4]) {
+        const s = sim.s - sim.dir * (m.carCenter(i) + dz);
         pts.push({ s, lat: this.trackLat(s) + sim.dir * side * (this.spec.carWidth / 2 + 0.3) });
       }
-    });
+    }
     return pts;
   }
 
@@ -280,7 +275,7 @@ export class Game {
     this.model.reverse();
     // кабина переходит в новый головной вагон
     this.cab.group.removeFromParent();
-    this.cab.build(this.model.cars[0]).then(() => {});
+    this.cab.build(this.model.cars[0], this.model).then(() => {});
     this.msg('Кабина сменена. Реверсор в нейтрали.');
     this.stopState.arrivedIdx = -1;
     if (this.cfg.mode === 'free') {
@@ -417,9 +412,8 @@ export class Game {
     // попутные/встречные
     this.traffic.update(dt, this.env.time, sim.s, this.camera.position);
     // модель
-    this.model.updatePose(route, sim.s, sim.dir, 0, dt, sim.v);
-    // поправка на текущий путь (trackPos)
-    this.placeOnTrack();
+    this.placeOnTrack(dt);
+    this.cab.setInside?.(this.rig.mode === 'cab');
     this.model.setDoors(sim.doors.left, sim.doors.right);
     this.model.setLights({ head: sim.headlights, night: this.env.night });
     this.model.setPantograph(sim.pantograph ? 1 : 0);
@@ -433,19 +427,8 @@ export class Game {
     audio.update(dt, sim, this.env, { view: this.rig.mode, aiNear: aiNear < 60 ? 1 - aiNear / 60 : 0, city: zone, walking: this.rig.mode === 'walk' });
   }
 
-  placeOnTrack() {
-    const route = this.route, sim = this.sim, L = this.spec.carLength;
-    const tmpA = { x: 0, y: 0, z: 0 }, tmpB = { x: 0, y: 0, z: 0 };
-    this.model.cars.forEach((car, i) => {
-      const sc = sim.s - sim.dir * (i * L + L / 2);
-      const sf = sc + sim.dir * (L / 2 - 3.2), sr = sc - sim.dir * (L / 2 - 3.2);
-      route.point(sf, this.trackLat(sf), 0, tmpA); route.point(sr, this.trackLat(sr), 0, tmpB);
-      car.position.set((tmpA.x + tmpB.x) / 2, (tmpA.y + tmpB.y) / 2, (tmpA.z + tmpB.z) / 2);
-      const dx = tmpA.x - tmpB.x, dz = tmpA.z - tmpB.z, dy = tmpA.y - tmpB.y;
-      const flip = this.model.flipped[i];
-      car.rotation.order = 'YXZ';
-      car.rotation.set(flip ? -Math.atan2(dy, Math.hypot(dx, dz)) : Math.atan2(dy, Math.hypot(dx, dz)), Math.atan2(-dx, -dz) + (flip ? Math.PI : 0), 0);
-    });
+  placeOnTrack(dt = 0) {
+    this.model.place(this.route, this.sim.s, this.sim.dir, (s) => this.trackLat(s), dt, this.sim.v);
   }
 
   dispose() {

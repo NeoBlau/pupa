@@ -6,7 +6,7 @@ const tmp = { x: 0, y: 0, z: 0 };
 // Протягивает поперечный профиль вдоль пути.
 // profile(s) → [{lat, h, u?}] — точки сечения слева направо; origin — начало координат чанка.
 // uMode: 'lat' — u по поперечной координате, 'len' — по длине контура; vScale — масштаб v по длине.
-export function sweep(route, s0, s1, step, profile, origin, { uScale = 1, vScale = 1, closed = false, flipNormals = false } = {}) {
+export function sweep(route, s0, s1, step, profile, origin, { uScale = 1, vScale = 1, closed = false, flipNormals = false, colorFn = null } = {}) {
   const rows = [];
   const n = Math.max(1, Math.ceil((s1 - s0) / step));
   for (let i = 0; i <= n; i++) {
@@ -18,7 +18,7 @@ export function sweep(route, s0, s1, step, profile, origin, { uScale = 1, vScale
       const p = pr[k];
       route.point(s, p.lat, p.h, tmp);
       if (k > 0) acc += Math.hypot(p.lat - pr[k - 1].lat, p.h - pr[k - 1].h);
-      row.push({ x: tmp.x - origin.x, y: tmp.y - origin.y, z: tmp.z - origin.z, u: (p.u ?? acc) * uScale, v: s * vScale });
+      row.push({ x: tmp.x - origin.x, y: tmp.y - origin.y, z: tmp.z - origin.z, u: (p.u ?? acc) * uScale, v: s * vScale, c: colorFn ? colorFn(tmp.x, tmp.z, p) : null });
     }
     rows.push(row);
   }
@@ -39,6 +39,11 @@ export function sweep(route, s0, s1, step, profile, origin, { uScale = 1, vScale
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  if (colorFn) {
+    const col = new Float32Array(rows.length * m * 3); let ci = 0;
+    for (const row of rows) for (const p of row) { col[ci++] = p.c[0]; col[ci++] = p.c[1]; col[ci++] = p.c[2]; }
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  }
   g.setIndex(idx);
   g.computeVertexNormals();
   return g;

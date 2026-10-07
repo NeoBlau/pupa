@@ -1,6 +1,6 @@
 // Физика и органы управления электропоезда.
 // Положение: s — пикетаж (м) переднего (ведущего) конца поезда по оси линии; dir — направление «вперёд» кабины (+1/−1).
-import { ED4M_KM } from '../data/trains.js';
+import { ED4M_KM, carLengths } from '../data/trains.js';
 
 const G = 9.81;
 
@@ -8,7 +8,8 @@ export class TrainSim {
   constructor(spec, cars, { s = 0, dir = 1, loadFactor = 0.6 } = {}) {
     this.spec = spec;
     this.cars = cars;
-    this.length = spec.carLength * cars;
+    this.carLens = carLengths(spec, cars);
+    this.length = this.carLens.reduce((a, b) => a + b, 0);
     this.mass = (spec.tareMassPerCar + spec.loadMassPerCar * loadFactor) * cars * 1000; // кг
     this.massEq = this.mass * 1.08; // с учётом вращающихся масс
     this.maxForce = spec.maxForcePerCar * cars * 1000; // Н

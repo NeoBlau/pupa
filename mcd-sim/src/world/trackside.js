@@ -5,6 +5,7 @@ import { assets } from '../core/assets.js';
 import { placeMatrix, mergeGeoms, tf, sweep } from './geom.js';
 import { signalPlateTex, speedBoardTex, kmPostTex } from './signs.js';
 import { PLATFORM_EDGE } from '../sim/route.js';
+import { getSignalProto, instantiate } from '../core/realModels.js';
 
 export const MAST_STEP = 62;
 const CW_H = 6.1; // высота контактного провода, м
@@ -156,17 +157,32 @@ export function buildSignal(route, sig, origin) {
   if (st && !st.island) lat = route.trackOffset(s, track) + track * (PLATFORM_EDGE + st.platformWidth + 1.2);
   const m = placeMatrix(route, s, lat, 0, origin, { yaw: sig.dir > 0 ? 0 : Math.PI });
   g.applyMatrix4(m);
-  const H = sig.kind === 'exit' || sig.kind === 'end' ? 4.6 : 5.6;
+  const proto = getSignalProto();
+  let lenses = {};
+  let H = sig.kind === 'exit' || sig.kind === 'end' ? 4.6 : 5.6;
+  if (proto) {
+    // готовая модель российского светофора (Sketchfab): мачта с полосами, головка на 5 линз
+    const m = instantiate(proto.parts, { cast: true });
+    m.position.y = -1.0;
+    g.add(m);
+    H = 6.2 - 1.0;
+    for (const asp of LENS_ORDER) {
+      const [x, y, z] = proto.lenses[asp];
+      const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: r.glowTex, color: ASPECT_COLORS[asp], transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }));
+      glow.position.set(x, y - 1.0, z + 0.05); g.add(glow);
+      const disc = new THREE.Mesh(r.lensGeo, new THREE.MeshBasicMaterial({ color: 0x111111 }));
+      disc.scale.setScalar(1.05); disc.position.set(x, y - 1.0, z + 0.01); g.add(disc);
+      lenses[asp] = { mat: disc.material, glow };
+    }
+  } else {
   const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.12, H + 1, 10), r.mastM);
   mast.position.y = (H + 1) / 2 - 1.0; mast.castShadow = true; g.add(mast);
-  // полосатая окраска входного/выходного
   if (sig.kind !== 'block') {
     for (let i = 0; i < 4; i++) { const b = new THREE.Mesh(new THREE.CylinderGeometry(0.095, 0.1, 0.35, 10), r.stripe); b.position.y = 1.2 + i * 0.75; g.add(b); }
   }
   const head = new THREE.Group();
   head.position.set(0, H, 0.05);
   const box = new THREE.Mesh(new THREE.BoxGeometry(0.42, 1.05, 0.26), r.body); box.castShadow = true; head.add(box);
-  const lenses = {};
   LENS_ORDER.forEach((asp, i) => {
     const y = 0.33 - i * 0.33;
     const mat = new THREE.MeshBasicMaterial({ color: 0x111111 });
@@ -177,16 +193,17 @@ export function buildSignal(route, sig, origin) {
     lenses[asp] = { mat, glow };
   });
   g.add(head);
+  }
   // табличка с номером
   const plate = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.3), new THREE.MeshStandardMaterial({ map: signalPlateTex(sig.name), roughness: 0.7 }));
-  plate.position.set(0, H - 0.75, 0.1); g.add(plate);
+  plate.position.set(proto ? proto.lenses.red[0] : 0, proto ? 2.3 : H - 0.75, 0.25); g.add(plate);
   g.userData.signal = sig;
   g.userData.update = (night) => {
     for (const asp of LENS_ORDER) {
       const on = sig.aspect === asp;
       lenses[asp].mat.color.setHex(on ? ASPECT_COLORS[asp] : 0x141414);
       lenses[asp].glow.material.opacity = on ? 0.55 + night * 0.45 : 0;
-      lenses[asp].glow.scale.setScalar(on ? 0.9 + night * 2.2 : 0.1);
+      lenses[asp].glow.scale.setScalar(on ? 0.7 + night * 2.2 : 0.1);
     }
   };
   g.userData.update(0);

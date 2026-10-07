@@ -34,7 +34,12 @@ for (const [key, m] of Object.entries(list)) {
   const glb = path.join(OUT, `${key}.glb`);
   if (fs.existsSync(glb)) continue;
   try {
-    const r = await fetch(`https://api.sketchfab.com/v3/models/${m.uid}/download`, { headers: { Authorization: `Token ${token}` } });
+    let r;
+    for (let k = 0; k < 8; k++) {
+      r = await fetch(`https://api.sketchfab.com/v3/models/${m.uid}/download`, { headers: { Authorization: `Token ${token}` } });
+      if (r.status !== 429) break;
+      console.log('429, ждём', key); await new Promise((res) => setTimeout(res, 45000));
+    }
     if (!r.ok) throw new Error(`download info ${r.status}`);
     const info = await r.json();
     const dir = path.join(TMP, key);

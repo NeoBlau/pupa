@@ -1,0 +1,31 @@
+{
+ "models": [
+  "berezki",
+  "birch_1",
+  "birch_2",
+  "birch_group",
+  "depot_ramenskoe",
+  "ed4_alt",
+  "ed4m_exterior",
+  "ed4m_train",
+  "er2_exterior",
+  "es2g_cab",
+  "es2g_exterior",
+  "footbridge",
+  "house_1970",
+  "house_9storey",
+  "house_lowpoly_8k",
+  "house_moscow_multi",
+  "house_moscow_res1",
+  "house_moscow_res2",
+  "house_soviet2",
+  "khrushchevka",
+  "light_signals",
+  "panel_house_1",
+  "panel_house_2",
+  "panel_house_3",
+  "panel_house_4",
+  "rzd_sign",
+  "turnstile"
+ ]
+}

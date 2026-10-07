@@ -7,6 +7,7 @@ import { placeMatrix, mergeGeoms, tf, sweep } from './geom.js';
 import { mulberry32, hashStr } from '../core/rng.js';
 import { terrainH } from './track.js';
 import { PLATFORM_EDGE } from '../sim/route.js';
+import { loadHouses, loadBirches } from '../core/realModels.js';
 
 const LIB = { trees: [], shrubs: [], grass: [], fence: null, car: null, poles: null, buildings: [], factory: null, garage: null };
 let renderer = null;
@@ -74,20 +75,11 @@ export async function loadScenery(r) {
   if (car) { const holder = car.scene.clone(true); LIB.car = { parts: flattenModel(holder), box: new THREE.Box3().setFromObject(holder) }; }
   if (poles) LIB.poles = nodeParts(poles, 'pole') || null;
   if (factory) LIB.factory = factory;
-  // панельные дома Sketchfab (если скачаны)
-  for (const key of ['panel_house_1', 'panel_house_2', 'panel_house_3', 'panel_house_4', 'khrushchevka']) {
-    const g = await assets.sketch(key);
-    if (!g) continue;
-    const root = g.scene;
-    const box = new THREE.Box3().setFromObject(root);
-    const size = box.getSize(new THREE.Vector3());
-    // нормализуем: высота этажа ≈2.8 м; модели бывают в см/дюймах
-    const floors = key === 'khrushchevka' ? 5 : 9 + (LIB.buildings.length % 3) * 3;
-    const s = (floors * 2.8) / size.y;
-    const holder = new THREE.Group(); const c = root.clone(true);
-    c.scale.setScalar(s); c.position.set(-(box.min.x + box.max.x) / 2 * s, -box.min.y * s, -(box.min.z + box.max.z) / 2 * s);
-    holder.add(c);
-    LIB.buildings.push({ key, parts: flattenModel(holder), box: new THREE.Box3().setFromObject(holder) });
+  // жилые дома — готовые модели Sketchfab
+  for (const h of await loadHouses()) LIB.buildings.push(h);
+  // берёзы (Sketchfab)
+  for (const b of await loadBirches()) {
+    LIB.trees.push({ kind: 'birch', parts: b.parts, imp: makeImpostor(b.holder) });
   }
 }
 
@@ -232,7 +224,7 @@ export function buildScenery(route, s0, s1, origin, { season = 'summer' } = {}) 
   const free = (s, lat, r) => !occupied.some((o) => Math.abs(o.s - s) < o.r + r && Math.abs(o.lat - lat) < o.r + r);
   const stationNear = (s, pad) => route.stations.some((st) => Math.abs(st.s - s) < st.platformLength / 2 + pad);
   const winter = season === 'winter';
-  const leafOK = (k) => !(winter && LIB.trees[k].kind === 'leaf');
+  const leafOK = (k) => !(winter && (LIB.trees[k].kind === 'leaf' || LIB.trees[k].kind === 'birch'));
 
   for (const side of [-1, 1]) {
     const base = (s) => Math.abs(route.trackOffset(s, side)) + 3.4;
@@ -273,9 +265,13 @@ export function buildScenery(route, s0, s1, origin, { season = 'summer' } = {}) 
             occupied.push({ s, lat, r });
             const yaw = (side > 0 ? -Math.PI / 2 : Math.PI / 2) + (rnd() < 0.3 ? Math.PI / 2 : 0) + (rnd() - 0.5) * 0.1;
             const h = terrainH(route, s, lat);
-            if (LIB.buildings.length && rnd() < 0.85) {
-              const k = Math.floor(rnd() * LIB.buildings.length);
-              buildingsSk[k].push(placeMatrix(route, s, lat, h - 0.3, origin, { yaw }));
+            const fit = LIB.buildings.map((b, k) => k).filter((k) => LIB.buildings[k].zone.includes(zone) && (!LIB.buildings[k].rare || rnd() < 0.15));
+            if (fit.length) {
+              const k = fit[Math.floor(rnd() * fit.length)];
+              const B = LIB.buildings[k];
+              const off = Math.sign(lat) * Math.max(0, B.radius - 22);
+              buildingsSk[k].push(placeMatrix(route, s, lat + off, terrainH(route, s, lat + off) - 0.3, origin, { yaw }));
+              occupied.push({ s, lat: lat + off, r: B.radius });
             } else {
               const floors = zone === 'city' ? [9, 12, 14, 16, 17, 22][Math.floor(rnd() * 6)] : [5, 5, 9, 9, 12, 14][Math.floor(rnd() * 6)];
               const sections = 1 + Math.floor(rnd() * (floors > 14 ? 2 : 4));
@@ -305,7 +301,8 @@ export function buildScenery(route, s0, s1, origin, { season = 'summer' } = {}) 
       let k = Math.floor(rnd() * LIB.trees.length);
       if (!LIB.trees.length) break;
       if (!leafOK(k)) k = 0;
-      if (zone !== 'forest' && rnd() < 0.6) k = LIB.trees.findIndex((t) => t.kind === 'leaf') >= 0 && !winter ? LIB.trees.findIndex((t) => t.kind === 'leaf') : k;
+      const birches = LIB.trees.map((t, i) => (t.kind === 'birch' ? i : -1)).filter((i) => i >= 0);
+      if (birches.length && !winter && rnd() < (zone === 'forest' ? 0.4 : 0.6)) k = birches[Math.floor(rnd() * birches.length)];
       const sc = 0.75 + rnd() * 0.55;
       const mm = placeMatrix(route, s, lat, terrainH(route, s, lat) - 0.1, origin, { yaw: rnd() * 6.28, scale: sc });
       if (d < 45) treesFull[k].push(mm); else treesImp[k].push(mm);

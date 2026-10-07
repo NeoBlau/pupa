@@ -1,0 +1,24 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Просмотр модели</title><style>body{margin:0;background:#888}canvas{display:block}#i{position:fixed;left:8px;top:8px;color:#fff;font:14px monospace;background:#0008;padding:6px}</style></head>
+<body><div id="i"></div><script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+const q = new URLSearchParams(location.search);
+const r = new THREE.WebGLRenderer({ antialias: true }); r.setSize(innerWidth, innerHeight); r.toneMapping = THREE.ACESFilmicToneMapping; r.outputColorSpace = THREE.SRGBColorSpace; document.body.append(r.domElement);
+const s = new THREE.Scene(); s.background = new THREE.Color(0x9fb0c0);
+s.environment = new THREE.PMREMGenerator(r).fromScene(new RoomEnvironment(), 0.04).texture;
+const sun = new THREE.DirectionalLight(0xffffff, 2.5); sun.position.set(5, 10, 7); s.add(sun);
+const cam = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.01, 5000);
+new GLTFLoader().load(q.get('m'), (g) => {
+  s.add(g.scene);
+  const b = new THREE.Box3().setFromObject(g.scene), sz = b.getSize(new THREE.Vector3()), c = b.getCenter(new THREE.Vector3());
+  let tris = 0, meshes = 0; g.scene.traverse((o) => { if (o.isMesh) { meshes++; tris += (o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count) / 3; } });
+  document.getElementById('i').textContent = `size ${sz.x.toFixed(2)} x ${sz.y.toFixed(2)} x ${sz.z.toFixed(2)}  min ${b.min.toArray().map(v=>v.toFixed(1))}  meshes ${meshes} tris ${tris}`;
+  window.__info = { size: sz.toArray(), min: b.min.toArray(), max: b.max.toArray(), meshes, tris };
+  const d = Math.max(sz.x, sz.y, sz.z) * (parseFloat(q.get('z')) || 1.3);
+  const az = parseFloat(q.get('az') || '0.7'), el = parseFloat(q.get('el') || '0.35');
+  cam.position.set(c.x + Math.sin(az) * Math.cos(el) * d, c.y + Math.sin(el) * d, c.z + Math.cos(az) * Math.cos(el) * d);
+  if (q.get('eye')) { const e = q.get('eye').split(',').map(Number); cam.position.set(...e.slice(0, 3)); cam.lookAt(...e.slice(3, 6)); } else cam.lookAt(c);
+  r.render(s, cam); window.__done = true;
+});
+</script></body></html>

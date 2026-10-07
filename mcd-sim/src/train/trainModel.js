@@ -3,6 +3,8 @@
 // Запасная модель — не готовый ассет и так и обозначается в интерфейсе.
 import * as THREE from 'three';
 import { assets, flattenModel } from '../core/assets.js';
+import { hasRealTrain, loadRealTrain, instantiate } from '../core/realModels.js';
+import { carLengths, isHeadCar } from '../data/trains.js';
 import { mergeGeoms, tf } from '../world/geom.js';
 
 const FLOOR = 1.33;
@@ -381,26 +383,17 @@ function buildProceduralCar(spec, idx, cars, { cab = false } = {}) {
   return car;
 }
 
-// Нормализация внешней модели Sketchfab: длинная ось → Z, низ → 0, масштаб по длине
-function normalizeExternal(root, targetLen) {
-  const box = new THREE.Box3().setFromObject(root);
-  const size = box.getSize(new THREE.Vector3());
-  const holder = new THREE.Group();
-  const inner = root.clone(true);
-  holder.add(inner);
-  if (size.x > size.z) inner.rotation.y = Math.PI / 2;
-  holder.updateMatrixWorld(true);
-  const b2 = new THREE.Box3().setFromObject(holder);
-  const s2 = b2.getSize(new THREE.Vector3());
-  const k = targetLen / s2.z;
-  inner.scale.multiplyScalar(k);
-  holder.updateMatrixWorld(true);
-  const b3 = new THREE.Box3().setFromObject(holder);
-  inner.position.x -= (b3.min.x + b3.max.x) / 2;
-  inner.position.y -= b3.min.y;
-  inner.position.z -= (b3.min.z + b3.max.z) / 2;
-  holder.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-  return { holder, rawLen: s2.z, size: s2.multiplyScalar(k) };
+// Огни: светящиеся спрайты (фары/хвостовые) — у реальных моделей стёкла фар не светятся сами
+let glowTex = null;
+function glow(color, size) {
+  if (!glowTex) {
+    const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d');
+    const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.2, 'rgba(255,255,255,0.7)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = gr; g.fillRect(0, 0, 64, 64); glowTex = new THREE.CanvasTexture(c);
+  }
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false }));
+  sp.scale.setScalar(size);
+  return sp;
 }
 
 export class TrainModel {
@@ -410,86 +403,84 @@ export class TrainModel {
     this.group = new THREE.Group();
     this.cars = [];
     this.flipped = [];
-    this.external = false;
-    this.wheelAngle = 0;
-    this.doorState = { left: 0, right: 0 };
+    this.lens = carLengths(spec, cars);
+    this.real = null;
   }
 
   async build() {
     const spec = this.spec;
-    const ext = await assets.sketch(spec.models.exterior);
-    let extInfo = null;
-    if (ext) {
-      const box = new THREE.Box3().setFromObject(ext.scene); const sz = box.getSize(new THREE.Vector3());
-      const longest = Math.max(sz.x, sz.z);
-      // если модель — целый состав (длинная по отношению к высоте), используем её как секцию из 5 вагонов
-      const ratio = longest / sz.y;
-      extInfo = { root: ext.scene, unitCars: ratio > 14 ? 5 : 1 };
-    }
+    this.real = hasRealTrain(spec.id) ? await loadRealTrain(spec.id) : null;
     for (let i = 0; i < this.nCars; i++) {
-      const isCab = i === 0 || i === this.nCars - 1 || (spec.id === 'es2g' && i % 5 === 0) || (spec.id === 'es2g' && i % 5 === 4);
       let car;
-      if (extInfo && extInfo.unitCars === 1 && isCab) {
-        const { holder } = normalizeExternal(extInfo.root, spec.carLength - 0.3);
-        car = new THREE.Group(); car.add(holder);
-        car.userData = { doors: { left: [], right: [] }, bogies: [], length: spec.carLength, external: true, cabOffset: -spec.carLength / 2 };
-        this.external = true;
-      } else if (extInfo && extInfo.unitCars === 5 && i % 5 === 0) {
-        const unitLen = spec.carLength * Math.min(5, this.nCars - i);
-        const { holder } = normalizeExternal(extInfo.root, unitLen);
-        holder.position.z = unitLen / 2 - spec.carLength / 2;
-        car = new THREE.Group(); car.add(holder);
-        car.userData = { doors: { left: [], right: [] }, bogies: [], length: spec.carLength, external: true, unit: Math.min(5, this.nCars - i), cabOffset: -spec.carLength / 2 };
-        this.external = true;
-      } else if (extInfo && extInfo.unitCars === 5) {
-        car = new THREE.Group(); car.userData = { doors: { left: [], right: [] }, bogies: [], length: spec.carLength, external: true, hiddenPart: true };
+      if (this.real) {
+        const role = this.real.cfg.roles(i, this.nCars);
+        const piece = this.real.pieces[role.piece];
+        car = new THREE.Group();
+        const inner = instantiate(piece.parts);
+        inner.rotation.y = role.flip ? Math.PI : 0;
+        car.add(inner);
+        const L = this.lens[i];
+        const isHead = role.piece === 'head';
+        // фары и хвостовые огни на носу головного
+        let headlights = null, taillights = null;
+        if (isHead) {
+          const nz = piece.box.min.z + 0.15, w = (piece.box.max.x - piece.box.min.x) / 2;
+          headlights = [glow(0xfff4d8, 1.6), glow(0xfff4d8, 1.6), glow(0xfff4d8, 1.3)];
+          headlights[0].position.set(-w * 0.62, 1.25, nz); headlights[1].position.set(w * 0.62, 1.25, nz); headlights[2].position.set(0, 3.45, nz + 0.9);
+          taillights = [glow(0xff2a10, 0.9), glow(0xff2a10, 0.9)];
+          taillights[0].position.set(-w * 0.72, 1.05, nz); taillights[1].position.set(w * 0.72, 1.05, nz);
+          for (const l of [...headlights, ...taillights]) inner.add(l);
+        }
+        // двери (условные проёмы на четвертях длины — для посадки и ходьбы)
+        const doorZ = [-L / 4, L / 4];
+        car.userData = { length: L, inner, real: true, isHead, flip: role.flip, piece, headlights, taillights, doorZ, doors: { left: [], right: [] }, bogies: [] };
+        this.flipped.push(false);
       } else {
-        car = buildProceduralCar(spec, i, this.nCars, { cab: isCab });
+        car = buildProceduralCar(spec, i, this.nCars, { cab: isHeadCar(spec, i, this.nCars) });
+        car.userData.doorZ = null;
+        this.flipped.push(i === this.nCars - 1 || (spec.unit && i % spec.unit === spec.unit - 1));
       }
-      // хвостовой вагон развёрнут
-      const flip = i === this.nCars - 1 || (spec.id === 'es2g' && i % 5 === 4);
-      this.flipped.push(flip);
       this.cars.push(car);
       this.group.add(car);
     }
   }
 
-  // Смена направления — головной становится хвостовым
+  // Смена кабины: головной становится хвостовым
   reverse() {
     this.cars.reverse();
-    this.flipped = this.flipped.reverse().map((f) => !f);
+    this.lens.reverse();
+    if (this.real) for (const car of this.cars) { car.userData.inner.rotation.y += Math.PI; car.userData.flip = !car.userData.flip; }
+    else this.flipped = this.flipped.reverse().map((f) => !f);
   }
 
-  // Расстановка вагонов по пути. sFront — пикетаж головы, dir — направление «вперёд», track — путь (±1)
-  updatePose(route, sFront, dir, track, dt, speed) {
-    const L = this.spec.carLength;
-    const tmpA = { x: 0, y: 0, z: 0 }, tmpB = { x: 0, y: 0, z: 0 };
+  // Центр вагона i: расстояние от головы состава
+  carCenter(i) { let d = 0; for (let k = 0; k < i; k++) d += this.lens[k]; return d + this.lens[i] / 2; }
+
+  // Расстановка по пути: latFn(s) — поперечное положение оси пути
+  place(route, sFront, dir, latFn, dt = 0, speed = 0) {
+    const a = { x: 0, y: 0, z: 0 }, b = { x: 0, y: 0, z: 0 };
     for (let i = 0; i < this.cars.length; i++) {
       const car = this.cars[i];
-      const sc = sFront - dir * (i * L + L / 2);
-      const sf = sc + dir * (L / 2 - 3.2), sr = sc - dir * (L / 2 - 3.2);
-      route.point(sf, route.trackOffset(sf, track), 0, tmpA);
-      route.point(sr, route.trackOffset(sr, track), 0, tmpB);
-      car.position.set((tmpA.x + tmpB.x) / 2, (tmpA.y + tmpB.y) / 2, (tmpA.z + tmpB.z) / 2);
-      const dx = tmpA.x - tmpB.x, dz = tmpA.z - tmpB.z, dy = tmpA.y - tmpB.y;
-      const yaw = Math.atan2(-dx, -dz); // −Z смотрит вперёд
-      const pitch = Math.atan2(dy, Math.hypot(dx, dz));
+      const L = this.lens[i];
+      const sc = sFront - dir * this.carCenter(i);
+      const sf = sc + dir * (L / 2 - 3.0), sr = sc - dir * (L / 2 - 3.0);
+      route.point(sf, latFn(sf), 0, a); route.point(sr, latFn(sr), 0, b);
+      car.position.set((a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2);
+      const dx = a.x - b.x, dz = a.z - b.z, dy = a.y - b.y;
       const flip = this.flipped[i];
-      car.rotation.set(0, 0, 0);
+      const pitch = Math.atan2(dy, Math.hypot(dx, dz));
       car.rotation.order = 'YXZ';
-      car.rotation.y = yaw + (flip ? Math.PI : 0);
-      car.rotation.x = flip ? -pitch : pitch;
-      const cant = route.cant(sc) * track * dir * 0.0; // визуальный крен отключён (путь без возвышения)
-      car.rotation.z = cant;
-      // тележки по оси пути
-      for (const b of car.userData.bogies || []) {
-        for (const ws of b.children) if (ws.userData.wheel) ws.rotation.x -= (speed * dt) / 0.425 * (flip ? -1 : 1);
-      }
+      car.rotation.set(flip ? -pitch : pitch, Math.atan2(-dx, -dz) + (flip ? Math.PI : 0), 0);
+      for (const bg of car.userData.bogies || []) for (const ws of bg.children) if (ws.userData.wheel) ws.rotation.x -= (speed * dt) / 0.425;
     }
   }
 
-  setDoors(left, right, dir) {
-    // left/right — относительно направления движения головы; у развёрнутых вагонов стороны меняются
+  updatePose(route, sFront, dir, track, dt, speed) {
+    this.place(route, sFront, dir, (s) => route.trackOffset(s, dir), dt, speed);
+  }
+
+  setDoors(left, right) {
+    if (this.real) return; // у готовых моделей двери не отделены от кузова
     for (let i = 0; i < this.cars.length; i++) {
       const car = this.cars[i];
       const flip = this.flipped[i];
@@ -506,16 +497,23 @@ export class TrainModel {
     }
   }
 
-  setLights({ head = true, night = 0, cabLight = false }) {
+  setLights({ head = true, night = 0 }) {
     const P = sharedParts();
     P.headlight.emissiveIntensity = head ? 3 + night * 6 : 0;
     P.tail.emissiveIntensity = 2 + night * 3;
     P.lightStrip.emissiveIntensity = 0.6 + night * 1.6;
-    // хвостовые огни только на хвостовом вагоне: прячем у головного
+    const n = this.cars.length;
     this.cars.forEach((car, i) => {
-      const isHead = i === 0, isTail = i === this.cars.length - 1;
-      if (car.userData.headlights) car.userData.headlights.forEach((h) => { h.visible = isHead; });
-      if (car.userData.taillights) car.userData.taillights.forEach((h) => { h.visible = isTail; });
+      const u = car.userData;
+      const isFront = i === 0, isTail = i === n - 1;
+      if (u.real) {
+        // нос «смотрит» вперёд у головного (flip=false) и назад у хвостового (flip=true)
+        if (u.headlights) u.headlights.forEach((h, k) => { h.visible = isFront && !u.flip && head; h.material.opacity = 0.35 + night * 0.65; h.scale.setScalar((k === 2 ? 1.1 : 1.4) * (1 + night * 1.5)); });
+        if (u.taillights) u.taillights.forEach((h) => { h.visible = isTail && u.flip; h.material.opacity = 0.5 + night * 0.5; });
+      } else {
+        if (u.headlights) u.headlights.forEach((h) => { h.visible = isFront; });
+        if (u.taillights) u.taillights.forEach((h) => { h.visible = isTail; });
+      }
     });
   }
 

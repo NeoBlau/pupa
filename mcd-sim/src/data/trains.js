@@ -9,7 +9,8 @@ export const TRAINS = {
     lines: ['D1', 'D2', 'D3', 'D4'],
     consists: [5, 10], // одиночный и сдвоенный составы
     defaultCars: 10,
-    carLength: 26.0, // м, approx (длина 5-вагонного состава ≈130 м)
+    carLength: 25.5, // м, средняя; фактические длины — headLength/midLength
+    headLength: 26.5, midLength: 24.8, unit: 5, // головные в каждой 5-вагонной секции
     carWidth: 3.48,
     carHeight: 4.4,
     floorHeight: 1.33, // approx
@@ -27,37 +28,8 @@ export const TRAINS = {
     doorWidth: 1.3,
     livery: { body: 0xf2f2f0, stripe: 0xd2232a, lower: 0x3a3d42, roof: 0x8a8f96, front: 0xd2232a },
     sound: { motor: 'igbt', motorBase: 180, motorSpan: 1300, compressor: 'screw', doorChime: 'desiro' },
-    models: { exterior: 'es2g_exterior', cab: 'es2g_cab' },
+    models: { exterior: 'es2g_exterior', cab: 'es2g_cab' }, // Sketchfab
     description: 'Основной поезд МЦД-1 и МЦД-3 в первые годы работы диаметров. Асинхронный тяговый привод, рекуперативное торможение, единая рукоятка контроллера.',
-  },
-  eg2tv: {
-    id: 'eg2tv',
-    name: 'ЭГ2Тв «Иволга»',
-    short: 'ЭГ2Тв',
-    maker: 'Тверской вагоностроительный завод',
-    lines: ['D1', 'D2', 'D3', 'D4'],
-    consists: [7, 11],
-    defaultCars: 11,
-    carLength: 24.0, // approx
-    carWidth: 3.48,
-    carHeight: 4.35,
-    floorHeight: 1.30,
-    tareMassPerCar: 50,
-    loadMassPerCar: 8,
-    powerPerCar: 460, // approx
-    maxForcePerCar: 48, // approx — ускорение до ≈1.0 м/с²
-    maxSpeed: 160,
-    serviceDecel: 1.2,
-    emergencyDecel: 1.45,
-    electricBrake: true,
-    brakeTimeConst: 0.5,
-    controller: 'combined',
-    doorsPerSide: 2,
-    doorWidth: 1.4,
-    livery: { body: 0xe9eaec, stripe: 0xd2232a, lower: 0x50555c, roof: 0x9aa0a6, front: 0x2b2e33 },
-    sound: { motor: 'igbt2', motorBase: 220, motorSpan: 1500, compressor: 'screw', doorChime: 'ivolga' },
-    models: { exterior: 'eg2tv_exterior', cab: 'es2g_cab' },
-    description: 'Отечественный электропоезд для МЦД-2 и МЦД-4. Быстрее разгоняется, широкие двери, асинхронный привод.',
   },
   ed4m: {
     id: 'ed4m',
@@ -68,6 +40,7 @@ export const TRAINS = {
     consists: [10, 11],
     defaultCars: 10,
     carLength: 21.5,
+    headLength: 21.5, midLength: 21.5, unit: 0,
     carWidth: 3.48,
     carHeight: 4.25,
     floorHeight: 1.40,
@@ -85,7 +58,7 @@ export const TRAINS = {
     doorWidth: 1.05,
     livery: { body: 0xd8d4c4, stripe: 0x2a6b3f, lower: 0x2f4f3a, roof: 0x7f8580, front: 0xc23b2e },
     sound: { motor: 'dc', motorBase: 70, motorSpan: 380, compressor: 'piston', doorChime: 'none' },
-    models: { exterior: 'ed4m_exterior', cab: null },
+    models: { exterior: 'ed4m_train', cab: null }, // Sketchfab: головной ЭД4М-0431 + промежуточный
     description: 'Классическая электричка с коллекторными двигателями: отдельный контроллер машиниста и кран №395, тормоза срабатывают с задержкой. Работала на МЦД в первые годы (approx).',
   },
 };
@@ -111,4 +84,12 @@ export const KRAN395 = [
   { name: 'VI', desc: 'Экстренное торможение' },
 ];
 
-export function consistLength(train, cars) { return train.carLength * cars; }
+// Является ли вагон i головным (с кабиной)
+export function isHeadCar(spec, i, n) {
+  if (i === 0 || i === n - 1) return true;
+  return spec.unit > 0 && (i % spec.unit === 0 || i % spec.unit === spec.unit - 1);
+}
+export function carLengths(spec, n) {
+  return Array.from({ length: n }, (_, i) => (isHeadCar(spec, i, n) ? spec.headLength : spec.midLength));
+}
+export function consistLength(spec, n) { return carLengths(spec, n).reduce((a, b) => a + b, 0); }

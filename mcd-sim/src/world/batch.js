@@ -23,10 +23,11 @@ export function batchStatic(root) {
     const geos = [];
     let cast = false, receive = false;
     const anyNonIndexed = list.some((m) => !m.geometry.index);
+    const keepColor = list.every((m) => m.geometry.attributes.color);
     for (const m of list) {
       rel.multiplyMatrices(inv, m.matrixWorld);
       let g = m.geometry.clone();
-      for (const name of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(name)) g.deleteAttribute(name);
+      for (const name of Object.keys(g.attributes)) if (!['position', 'normal', 'uv', ...(keepColor ? ['color'] : [])].includes(name)) g.deleteAttribute(name);
       if (!g.attributes.normal) g.computeVertexNormals();
       if (!g.attributes.uv) g.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
       if (anyNonIndexed && g.index) g = g.toNonIndexed();

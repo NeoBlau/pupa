@@ -1,17 +1,111 @@
 {
-  "_comment": "Модели Sketchfab (все CC Attribution, авторы указаны на странице модели: https://sketchfab.com/3d-models/<uid>). Загружаются tools/fetch-sketchfab.mjs при наличии переменной SKETCHFAB_TOKEN.",
-  "es2g_exterior":  { "uid": "1e2e86e317164b5983a000f79c6fe7a2", "title": "Lastochka electric train" },
-  "es2g_cab":       { "uid": "cc0e1e15308e486383503f9eb18a4f35", "title": "Desiro 45 \"Lastochka\" Train Driver Console" },
-  "es1_exterior":   { "uid": "f9685e074e934b14b16986e85d53495b", "title": "ES1 \"Lastochka\"" },
-  "ed4m_exterior":  { "uid": "77e5ecde38df45d29176f386c1ced65a", "title": "Rzhd-ed4m_vagon" },
-  "eg2tv_exterior": { "uid": "6121dd651f7c40ff85feeeb5bffa4524", "title": "н иволга" },
-  "panel_house_1":  { "uid": "4a10917f543749769de54d131386b85f", "title": "Russian-Soviet panel house: Panelka" },
-  "panel_house_2":  { "uid": "c997dea23fdc401e85d54929ded3e744", "title": "Soviet house. Panel house. 1-438-6" },
-  "panel_house_3":  { "uid": "e57038e4d70b449599e5948d31c97a63", "title": "Soviet Panel House (Ussr)" },
-  "panel_house_4":  { "uid": "7bef9b27b4c54a03b64e2f395fef3d7f", "title": "Modular Russian panel house" },
-  "khrushchevka":   { "uid": "a9b9f378081e456b8b5e221a8eb1546e", "title": "Khrushchevka USSR Building" },
-  "rzd_sign":       { "uid": "9a1a60f7a59b40fa8f1a3e7ae51e2543", "title": "Path pointer RZD" },
-  "turnstile":      { "uid": "eed7f05ffcff4251a3f1cbef98342093", "title": "Subway Turnstile" },
-  "footbridge":     { "uid": "c522e5e8badd475f9820d27f06d6153b", "title": "Footbridge" },
-  "light_signals":  { "uid": "19ec11684eae47eb96474634750b4398", "title": "Railway Light Signals" }
+ "_comment": "Модели Sketchfab (все CC Attribution, авторы указаны на странице модели: https://sketchfab.com/3d-models/<uid>). Загружаются tools/fetch-sketchfab.mjs при наличии переменной SKETCHFAB_TOKEN.",
+ "es2g_exterior": {
+  "uid": "1e2e86e317164b5983a000f79c6fe7a2",
+  "title": "Lastochka electric train"
+ },
+ "es2g_cab": {
+  "uid": "cc0e1e15308e486383503f9eb18a4f35",
+  "title": "Desiro 45 \"Lastochka\" Train Driver Console"
+ },
+ "ed4m_exterior": {
+  "uid": "77e5ecde38df45d29176f386c1ced65a",
+  "title": "Rzhd-ed4m_vagon"
+ },
+ "panel_house_1": {
+  "uid": "4a10917f543749769de54d131386b85f",
+  "title": "Russian-Soviet panel house: Panelka"
+ },
+ "panel_house_2": {
+  "uid": "c997dea23fdc401e85d54929ded3e744",
+  "title": "Soviet house. Panel house. 1-438-6"
+ },
+ "panel_house_3": {
+  "uid": "e57038e4d70b449599e5948d31c97a63",
+  "title": "Soviet Panel House (Ussr)"
+ },
+ "panel_house_4": {
+  "uid": "7bef9b27b4c54a03b64e2f395fef3d7f",
+  "title": "Modular Russian panel house"
+ },
+ "khrushchevka": {
+  "uid": "a9b9f378081e456b8b5e221a8eb1546e",
+  "title": "Khrushchevka USSR Building"
+ },
+ "rzd_sign": {
+  "uid": "9a1a60f7a59b40fa8f1a3e7ae51e2543",
+  "title": "Path pointer RZD"
+ },
+ "turnstile": {
+  "uid": "eed7f05ffcff4251a3f1cbef98342093",
+  "title": "Subway Turnstile"
+ },
+ "footbridge": {
+  "uid": "c522e5e8badd475f9820d27f06d6153b",
+  "title": "Footbridge"
+ },
+ "light_signals": {
+  "uid": "19ec11684eae47eb96474634750b4398",
+  "title": "Railway Light Signals"
+ },
+ "er2_exterior": {
+  "uid": "7c45b0e3c0174ff18b14cbc56fdedc87",
+  "title": "ER2 Trainset"
+ },
+ "house_9storey": {
+  "uid": "33a2b2901adc4b38ab83021b0837cd10",
+  "title": "nine-story building of the post soviet"
+ },
+ "house_1970": {
+  "uid": "94996e8cf4a8452d91ec1e206b5b4137",
+  "title": "Soviet panel house built in the 1970s"
+ },
+ "house_soviet2": {
+  "uid": "cb5c1471b2ab4f12a308f6f8931af332",
+  "title": "Soviet Residential Building 2"
+ },
+ "house_moscow_multi": {
+  "uid": "df74f11b75a94420bf1110a6909a62e9",
+  "title": "Multi-storey building in Moscow"
+ },
+ "house_moscow_res1": {
+  "uid": "5653cbfa4c324667ba595d847e456b8d",
+  "title": "Residential building (Moscow)"
+ },
+ "house_moscow_res2": {
+  "uid": "f553cb2d55f749c8a9eead7bd4be724d",
+  "title": "Residential building (Moscow)"
+ },
+ "house_lowpoly_8k": {
+  "uid": "05229ac1d1f94e6c8cacaad91110c602",
+  "title": "LOW POLY - SOVIET APARTMENT BUILDING 8K"
+ },
+ "birch_1": {
+  "uid": "aa842dffd9654d33b8b91170ce83c172",
+  "title": "Birch tree"
+ },
+ "birch_2": {
+  "uid": "4d04ccf7bef7498abcd4bfd50533bba8",
+  "title": "Birch Tree"
+ },
+ "birch_group": {
+  "uid": "de6263e5400b4a52a795decf84f06575",
+  "title": "Birch trees"
+ },
+ "berezki": {
+  "uid": "6c9e5d45d8f446559987fb0e7530a29c",
+  "title": "Berezki"
+ },
+ "ed4m_train": {
+  "uid": "43c433d5c9df4b6fb6432ded7e4792a2",
+  "title": "поезд РЖД ЭД4М-0431"
+ },
+ "ed4_alt": {
+  "uid": "bb52ba30bbc04b358d2d1457df30ff2e",
+  "title": "ED4"
+ },
+ "depot_ramenskoe": {
+  "uid": "75606bba4cdc43aa88e6b49e4a3483f1",
+  "title": "RZD Ramenskoe EMU railway depot"
+ }
 }

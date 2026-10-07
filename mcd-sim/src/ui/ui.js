@@ -32,7 +32,7 @@ export class UI {
   mainMenu() {
     this.clear();
     const el = $(`<div class="menu"><div class="menu-inner">
-      <div class="brand"><div class="logo">МЦД</div><div><h1>Симулятор Московских центральных диаметров</h1><p>D1 · D2 · D3 · D4 — электропоезда ЭС2Г, ЭГ2Тв, ЭД4М</p></div></div>
+      <div class="brand"><div class="logo">МЦД</div><div><h1>Симулятор Московских центральных диаметров</h1><p>D1 · D2 · D3 · D4 — электропоезда ЭС2Г «Ласточка» и ЭД4М</p></div></div>
       <div class="step">Режим</div>
       <div class="cards">
         <button class="card" data-mode="schedule"><h3>По расписанию</h3><p>Рейс с графиком движения: время отправления и прибытия, остановки, сигналы, ограничения скорости. Поездка оценивается.</p></button>
@@ -57,8 +57,8 @@ export class UI {
   assetNote() {
     const n = assets.sketchfab.size;
     return n
-      ? `Подключено моделей Sketchfab: ${n}.`
-      : 'Модели Sketchfab (Ласточка, кабина Desiro, ЭД4М, Иволга, панельные дома) не скачаны — поезда показаны запасными процедурными моделями. Как подключить: README → «Ассеты Sketchfab».';
+      ? `Готовые модели: ЭС2Г «Ласточка» и кабина Desiro RUS, ЭД4М (головной и промежуточный, с салоном и кабиной), российские светофоры, панельные дома, берёзы — Sketchfab (${n} моделей); деревья, текстуры и реквизит — Poly Haven.`
+      : 'Модели Sketchfab не скачаны — запустите npm run assets:sketchfab с токеном (README).';
   }
 
   // ── настройка поездки ──
@@ -342,7 +342,7 @@ export class UI {
     const el = $(`<div class="overlay"><div class="panel"><h2>О проекте и ассетах</h2>
       <p class="note">Движок: three.js (WebGL2, PBR, тени, динамическое небо). Данные станций — OpenStreetMap (Nominatim). Объявления синтезированы Piper TTS (голоса ru_RU dmitri / irina).</p>
       <p class="note"><b>Готовые ассеты:</b> Poly Haven (CC0) — деревья (сосна, ель, лиственное), кустарник, трава, фонари, скамейки, урны, камеры, сетчатое ограждение, автомобили, PBR-текстуры (щебень, бетон, плитка, металл, трава, снег, асфальт). three.js examples — модели людей и анимации (Mixamo).</p>
-      <p class="note"><b>Sketchfab (CC-BY, требуется токен):</b> Ласточка, пульт Desiro «Ласточка», ЭД4М, Иволга, панельные дома, турникеты, пешеходный мост — подключены: ${assets.sketchfab.size ? [...assets.sketchfab].join(', ') : 'нет'}.</p>
+      <p class="note"><b>Sketchfab (CC-BY, требуется токен):</b> «Ласточка», пульт Desiro «Ласточка», ЭД4М, светофоры, панельные дома, берёзы, турникеты — подключены: ${assets.sketchfab.size ? [...assets.sketchfab].join(', ') : 'нет'}.</p>
       <p class="note"><b>Собственная геометрия (честно):</b> рельсы, шпалы, балласт, контактная сеть, светофоры, знаки, платформы, навесы, переходы, павильоны, запасные модели поездов, кабины и панельных домов. Пока модели Sketchfab не скачаны, поезда и кабина — запасные процедурные модели, это не уровень Train Sim World.</p>
       <div class="row"><button class="btn primary" data-a="back">Назад</button></div></div></div>`);
     el.querySelector('[data-a=back]').onclick = () => { el.remove(); back(); };

@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { assets } from '../core/assets.js';
 import { ED4M_KM, KRAN395 } from '../data/trains.js';
 import { fmtTime } from '../sim/timetable.js';
+import { instantiate } from '../core/realModels.js';
 
 const FONT = '"Segoe UI", "Roboto", Arial, sans-serif';
 const MONO = '"Consolas", "Courier New", monospace';
@@ -25,7 +26,74 @@ export class Cab {
     this.lastDraw = 0;
   }
 
-  async build(car) {
+  // Кабина: реальная модель (Sketchfab) с подменой экранов на живые дисплеи, либо запасной пульт
+  async build(car, model) {
+    this.main = screen(640, 400);
+    this.side = screen(512, 320);
+    this.klub = screen(512, 256);
+    this.buttons = {}; this.wipers = [];
+    const real = model?.real;
+    if (real && real.cab && car.userData.real) return this.buildRealES2G(car, real);
+    if (real && real.cfg.cabInModel && car.userData.real) return this.buildInModel(car, real);
+    return this.buildProcedural(car);
+  }
+
+  buildRealES2G(car, real) {
+    const c = real.cab, piece = car.userData.piece;
+    const g = this.group;
+    g.clear();
+    const cabModel = instantiate(c.parts, { cast: false });
+    g.add(cabModel);
+    // нос головного вагона — минимальный z детали; пульт вплотную к лобовому стеклу
+    const z0 = piece.box.min.z + c.frontInset + 0.72;
+    g.position.set(0, c.floor, z0);
+    g.rotation.set(0, 0, 0);
+    car.userData.inner.add(g);
+    this.eye.set(c.eye[0], c.eye[1], -c.eye[2]);
+    // экраны пульта → живые дисплеи
+    const map = { Display_HMI: this.main, Display_SLUC: this.klub, Display_CCTV: this.side };
+    cabModel.traverse((o) => {
+      if (!o.isMesh) return;
+      for (const [k, scr] of Object.entries(map)) if (o.name.includes(k)) o.material = new THREE.MeshBasicMaterial({ map: scr.t, toneMapped: false });
+    });
+    this.lightMat = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xfff2dc, emissiveIntensity: 0 });
+    const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.03, 0.25), this.lightMat); lamp.position.set(0, 2.15, 1.0); g.add(lamp);
+    this.cabLight = new THREE.PointLight(0xfff2dc, 0, 4); this.cabLight.position.set(0, 1.9, 0.8); g.add(this.cabLight);
+    this.hideInCab = [];
+    car.userData.inner.traverse((o) => { if (o.isMesh && real.cfg.hideInCab && real.cfg.hideInCab.test(o.name)) this.hideInCab.push(o); });
+    this.realCab = true;
+    return this;
+  }
+
+  buildInModel(car, real) {
+    const piece = car.userData.piece;
+    const g = this.group;
+    g.clear();
+    g.position.set(0, 0, 0);
+    car.userData.inner.add(g);
+    const e = new THREE.Vector3(...real.cfg.cabInModel.eye).applyMatrix4(piece.matrix);
+    this.eye.copy(e);
+    // блок КЛУБ-У и дисплей на пульте (дооснащение ЭД4М)
+    const dark = new THREE.MeshStandardMaterial({ color: 0x1d2024, roughness: 0.6 });
+    const mk = (scr, w, h, x, y, z, rx) => {
+      const grp = new THREE.Group(); grp.position.set(e.x + x, e.y + y, e.z + z); grp.rotation.x = rx;
+      const box = new THREE.Mesh(new THREE.BoxGeometry(w + 0.05, h + 0.05, 0.08), dark); box.position.z = -0.045; grp.add(box);
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: scr.t, toneMapped: false })); grp.add(m);
+      g.add(grp);
+    };
+    mk(this.klub, 0.28, 0.14, 0.05, -0.42, -0.62, -0.5);
+    mk(this.main, 0.3, 0.19, -0.3, -0.48, -0.6, -0.6);
+    mk(this.side, 0.26, 0.16, 0.36, -0.48, -0.6, -0.6);
+    this.lightMat = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xfff2dc, emissiveIntensity: 0 });
+    this.cabLight = new THREE.PointLight(0xfff2dc, 0, 4); this.cabLight.position.set(e.x, e.y + 0.6, e.z); g.add(this.cabLight);
+    this.hideInCab = [];
+    this.realCab = true;
+    return this;
+  }
+
+  setInside(inside) { for (const o of this.hideInCab || []) o.visible = !inside; }
+
+  async buildProcedural(car) {
     const spec = this.spec;
     const off = car.userData.cabOffset ?? -spec.carLength / 2;
     const g = this.group;
@@ -83,9 +151,6 @@ export class Cab {
     seat.position.set(cx, 0, 0.0); g.add(seat);
 
     // ── дисплеи ──
-    this.main = screen(640, 400);
-    this.side = screen(512, 320);
-    this.klub = screen(512, 256);
     const mkScreen = (s, w, h, pos, rx = 0.55) => {
       const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: s.t, toneMapped: false }));
       m.position.copy(pos); m.rotation.x = -rx; g.add(m);
@@ -136,12 +201,13 @@ export class Cab {
     return this;
   }
 
-  setLight(on) { this.lightMat.emissiveIntensity = on ? 1.5 : 0; }
+  setLight(on) { this.lightMat.emissiveIntensity = on ? 1.5 : 0; if (this.cabLight) this.cabLight.intensity = on ? 2.5 : 0; }
 
   update(dt, sim, safety, info) {
     const spec = this.spec;
     // рукоятки
-    if (spec.controller === 'combined') this.lever.rotation.x = -sim.lever * 0.6;
+    if (!this.lever) { /* у реальной модели рукоятки не отделены */ }
+    else if (spec.controller === 'combined') this.lever.rotation.x = -sim.lever * 0.6;
     else {
       this.lever.rotation.x = -(sim.km / (ED4M_KM.length - 1)) * 0.9;
       if (this.kranArm) this.kranArm.rotation.y = -0.9 + sim.kran * 0.3;

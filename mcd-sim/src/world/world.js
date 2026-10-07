@@ -47,8 +47,8 @@ export class World {
     const cat = buildCatenary(r, s0, s1, origin);
     const signs = buildSigns(r, s0, s1, origin);
     const sc = buildScenery(r, s0, s1, origin, { season: this.season });
-    g.add(track, cat, signs, sc.near, sc.always);
-    const ch = { i, s0, s1, group: g, track, near: sc.near, always: sc.always, signals: [], lod: -1 };
+    g.add(track, cat, signs, sc.near, sc.far, sc.always);
+    const ch = { i, s0, s1, group: g, track, near: sc.near, far: sc.far, always: sc.always, signals: [], lod: -1 };
     for (const dir of [1, -1]) for (const sig of r.signals[dir]) {
       if (sig.s >= s0 && sig.s < s1) {
         const o = buildSignal(r, sig, origin);
@@ -86,10 +86,11 @@ export class World {
       if (i < a - 2 || i > b + 2) { if (ch) this.disposeGroup(ch.group); this.chunks.delete(i); continue; }
       if (!ch) continue;
       const d = Math.abs((ch.s0 + ch.s1) / 2 - s);
-      const lod = d < 260 ? 0 : 1;
+      const lod = d < 320 ? 0 : 1;
       if (lod !== ch.lod) {
         ch.lod = lod;
         ch.near.visible = lod === 0;
+        ch.far.visible = lod !== 0;
         ch.always.traverse((o) => {
           if (o.userData.isImpostor) o.count = lod === 0 ? o.userData.nearCount : o.instanceMatrix.count;
         });

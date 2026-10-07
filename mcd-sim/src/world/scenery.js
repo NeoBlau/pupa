@@ -55,6 +55,52 @@ function makeImpostor(obj) {
   return { geo, mat, height: h };
 }
 
+// Импостер-«коробка» для зданий: 4 стороны рендерятся в атлас 2×2, крыша — тёмная
+function makeBoxImpostor(parts) {
+  const holder = new THREE.Group();
+  for (const p of parts) holder.add(new THREE.Mesh(p.geometry, p.material));
+  const box = new THREE.Box3().setFromObject(holder);
+  const size = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3());
+  const R = 1024, H = R / 2;
+  const rt = new THREE.WebGLRenderTarget(R, R, { samples: 4 });
+  rt.texture.colorSpace = THREE.SRGBColorSpace;
+  const scene = new THREE.Scene();
+  scene.add(new THREE.HemisphereLight(0xe8eef5, 0x777066, 1.9));
+  const dl = new THREE.DirectionalLight(0xffffff, 1.2); dl.position.set(0.3, 1, 0.5); scene.add(dl);
+  scene.add(holder);
+  const prevT = renderer.getRenderTarget(), prevA = renderer.getClearAlpha(), prevC = renderer.getClearColor(new THREE.Color());
+  renderer.setRenderTarget(rt); renderer.setClearColor(0x808080, 1); renderer.clear();
+  const views = [ // [направление взгляда, ширина, квадрант]
+    { dir: new THREE.Vector3(0, 0, -1), w: size.x, d: size.z, q: [0, 1] }, // фасад +Z
+    { dir: new THREE.Vector3(0, 0, 1), w: size.x, d: size.z, q: [1, 1] }, // −Z
+    { dir: new THREE.Vector3(-1, 0, 0), w: size.z, d: size.x, q: [0, 0] }, // +X
+    { dir: new THREE.Vector3(1, 0, 0), w: size.z, d: size.x, q: [1, 0] }, // −X
+  ];
+  rt.scissorTest = true;
+  for (const v of views) {
+    const cam = new THREE.OrthographicCamera(-v.w / 2, v.w / 2, size.y / 2, -size.y / 2, 0.1, v.d + 200);
+    cam.position.copy(c).addScaledVector(v.dir, -(v.d / 2 + 50)); cam.lookAt(c);
+    rt.viewport.set(v.q[0] * H, v.q[1] * H, H, H); rt.scissor.set(v.q[0] * H, v.q[1] * H, H, H);
+    renderer.setRenderTarget(rt);
+    renderer.render(scene, cam);
+  }
+  rt.scissorTest = false; rt.viewport.set(0, 0, R, R);
+  renderer.setRenderTarget(prevT); renderer.setClearColor(prevC, prevA);
+  holder.clear();
+  // коробка с UV на квадранты
+  const g = new THREE.BoxGeometry(size.x, size.y, size.z); g.translate(c.x, c.y, c.z);
+  const uv = g.attributes.uv;
+  // порядок граней BoxGeometry: +x, −x, +y, −y, +z, −z (по 4 вершины)
+  const quad = { 0: [0, 0], 1: [1, 0], 4: [0, 1], 5: [1, 1] };
+  for (let f = 0; f < 6; f++) for (let k = 0; k < 4; k++) {
+    const i = f * 4 + k;
+    if (quad[f]) uv.setXY(i, (quad[f][0] + uv.getX(i)) / 2, (quad[f][1] + uv.getY(i)) / 2);
+    else uv.setXY(i, 0.25, 0.25 + 0.0 * uv.getY(i));
+  }
+  const mat = new THREE.MeshStandardMaterial({ map: rt.texture, roughness: 0.9 });
+  return { geo: g, mat };
+}
+
 export async function loadScenery(r) {
   renderer = r;
   const [pine, fir, small, shrub2, grass, fence, car, poles, factory] = await Promise.all(
@@ -76,7 +122,7 @@ export async function loadScenery(r) {
   if (poles) LIB.poles = nodeParts(poles, 'pole') || null;
   if (factory) LIB.factory = factory;
   // жилые дома — готовые модели Sketchfab
-  for (const h of await loadHouses()) LIB.buildings.push(h);
+  for (const h of await loadHouses()) { h.imp = makeBoxImpostor(h.parts); LIB.buildings.push(h); }
   // берёзы (Sketchfab)
   for (const b of await loadBirches()) {
     LIB.trees.push({ kind: 'birch', parts: b.parts, imp: makeImpostor(b.holder) });
@@ -229,7 +275,7 @@ export function buildScenery(route, s0, s1, origin, { season = 'summer' } = {}) 
   for (const side of [-1, 1]) {
     const base = (s) => Math.abs(route.trackOffset(s, side)) + 3.4;
     // ограждения
-    const fenceType = zone === 'city' ? (rnd() < 0.55 ? 'concrete' : rnd() < 0.6 ? 'barrier' : 'chain') : zone === 'town' ? (rnd() < 0.5 ? 'chain' : rnd() < 0.5 ? 'concrete' : 'none') : (rnd() < 0.15 ? 'chain' : 'none');
+    const fenceType = zone === 'city' ? (rnd() < 0.6 ? 'concrete' : 'barrier') : zone === 'town' ? (rnd() < 0.5 ? 'concrete' : 'none') : 'none';
     const fenceLat = (s) => side * (base(s) + 7 + (stationNear(s, 0) ? 12 : 0));
     if (fenceType === 'concrete' || fenceType === 'barrier') {
       const H = fenceType === 'concrete' ? 2.5 : 4.2;
@@ -278,7 +324,7 @@ export function buildScenery(route, s0, s1, origin, { season = 'summer' } = {}) 
               procHouses.push({ m: placeMatrix(route, s, lat, h - 0.3, origin, { yaw }), floors, sections, mat: Math.floor(rnd() * 5) });
             }
             // машины у дома
-            if (LIB.car && rnd() < 0.7) for (let k = 0; k < 2 + rnd() * 4; k++) {
+            if (LIB.car && rnd() < 0.35) for (let k = 0; k < 1 + rnd() * 2; k++) {
               const cs = s + (rnd() - 0.5) * 30, cl = lat - side * (14 + rnd() * 4);
               cars.push(placeMatrix(route, cs, cl, terrainH(route, cs, cl), origin, { yaw: rnd() < 0.5 ? 0 : Math.PI }));
             }
@@ -338,7 +384,10 @@ export function buildScenery(route, s0, s1, origin, { season = 'summer' } = {}) 
   LIB.grass.forEach((p, k) => instanced(near, p.parts, grass[k]));
   if (LIB.fence) instanced(always, LIB.fence.parts, fences, { cast: true });
   if (LIB.car) instanced(always, LIB.car.parts, cars, { cast: true });
-  LIB.buildings.forEach((b, k) => instanced(always, b.parts, buildingsSk[k], { cast: true }));
+  LIB.buildings.forEach((b, k) => {
+    instanced(near, b.parts, buildingsSk[k], { cast: true });
+    if (b.imp) instanced(far, [{ geometry: b.imp.geo, material: b.imp.mat }], buildingsSk[k], { cast: false });
+  });
   if (procHouses.length) {
     const fm = facadeMaterials();
     for (const ph of procHouses) {

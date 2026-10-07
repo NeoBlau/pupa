@@ -83,7 +83,7 @@ export class Traffic {
       const vp = virtualPosition(this.route, run, time);
       if (vp.before || vp.after) continue;
       const d = Math.abs(vp.s - playerS);
-      if (d < 3500 && d > 400) this.spawn(run, vp, time);
+      if (d < 3000 && d > 400 && this.active.size + this.building.size < 2) this.spawn(run, vp, time);
     }
     for (const [id, a] of this.active) {
       a.driver.update(dt, time);

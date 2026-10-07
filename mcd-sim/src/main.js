@@ -99,7 +99,11 @@ const clock = new THREE.Clock();
 let menuAngle = 0;
 function loop() {
   requestAnimationFrame(loop);
-  const dt = Math.min(0.1, clock.getDelta());
+  if (window.__mcdManual) return; // ручной режим для автотестов (__mcd.step)
+  frame(Math.min(0.1, clock.getDelta()));
+}
+
+function frame(dt) {
   input.update();
   const g = app.game;
   if (g) {
@@ -125,5 +129,8 @@ function loop() {
 }
 
 // для отладки и автотестов
-window.__mcd = { app, env, renderer, scene, camera, input, settings };
+window.__mcd = {
+  app, env, renderer, scene, camera, input, settings,
+  step(n = 1, dt = 1 / 30) { for (let i = 0; i < n; i++) frame(dt); },
+};
 init();

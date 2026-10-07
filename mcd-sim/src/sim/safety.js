@@ -86,12 +86,13 @@ export class Safety {
     if (t.penaltyBrake && kmh < this.vAllowed - 3 && (t.spec.controller !== 'combined' || t.lever <= 0)) t.penaltyBrake = false;
     if (t.penaltyBrake && kmh < 0.3) t.penaltyBrake = false;
 
-    // проезд сигналов
+    // проезд сигналов (показание берём то, что было видно до вступления поезда в блок-участок)
     for (const sg of this.signals.lists[dir]) {
       const before = (sg.s - this.prevFront) * dir, after = (sg.s - front) * dir;
       if (before > 0 && after <= 0) {
         this.lastPassed = sg;
-        if (sg.aspect === 'red' && this.redPermission !== sg) {
+        const seen = this.ahead && this.ahead.sig === sg ? this.ahead.aspect : sg.aspect;
+        if (seen === 'red' && this.redPermission !== sg) {
           t.applyEmergency();
           t.msg(`Проезд запрещающего сигнала ${sg.name}!`);
           t.emit('spad');
@@ -100,6 +101,8 @@ export class Safety {
       }
     }
     this.prevFront = front;
+    const na = this.signals.nextSignal(front, dir, 0);
+    this.ahead = na ? { sig: na, aspect: na.aspect } : null;
 
     // остановка у красного проходного → предложение проследовать
     this.redOffer = null; this.prompt = '';

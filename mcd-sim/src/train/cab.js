@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { assets } from '../core/assets.js';
 import { ED4M_KM, KRAN395 } from '../data/trains.js';
 import { fmtTime } from '../sim/timetable.js';
-import { instantiate } from '../core/realModels.js';
+import { instantiate, carveParts } from '../core/realModels.js';
 
 const FONT = '"Segoe UI", "Roboto", Arial, sans-serif';
 const MONO = '"Consolas", "Courier New", monospace';
@@ -59,8 +59,14 @@ export class Cab {
     this.lightMat = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xfff2dc, emissiveIntensity: 0 });
     const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.03, 0.25), this.lightMat); lamp.position.set(0, 2.15, 1.0); g.add(lamp);
     this.cabLight = new THREE.PointLight(0xfff2dc, 0, 4); this.cabLight.position.set(0, 1.9, 0.8); g.add(this.cabLight);
-    this.hideInCab = [];
-    car.userData.inner.traverse((o) => { if (o.isMesh && real.cfg.hideInCab && real.cfg.hideInCab.test(o.name)) this.hideInCab.push(o); });
+    // вид из кабины: копия головного вагона с вырезанными лобовым и боковыми окнами кабины
+    const nz = piece.box.min.z, eyeY = c.floor + c.eye[1];
+    const carved = instantiate(carveParts(piece.parts, (x, y, z) =>
+      (z < nz + 3.4 && y > eyeY - 0.45 && y < eyeY + 1.25) || (z < nz + 5.2 && y > eyeY - 0.3 && y < eyeY + 0.75 && Math.abs(x) > 1.25)), { cast: false });
+    carved.visible = false;
+    car.userData.inner.add(carved);
+    this.carved = carved;
+    this.hideInCab = car.userData.inner.children.filter((o) => o.isMesh);
     this.realCab = true;
     return this;
   }
@@ -91,7 +97,10 @@ export class Cab {
     return this;
   }
 
-  setInside(inside) { for (const o of this.hideInCab || []) o.visible = !inside; }
+  setInside(inside) {
+    for (const o of this.hideInCab || []) o.visible = !inside;
+    if (this.carved) this.carved.visible = inside;
+  }
 
   async buildProcedural(car) {
     const spec = this.spec;

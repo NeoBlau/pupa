@@ -188,6 +188,27 @@ export async function loadRealTrain(id) {
   return p;
 }
 
+// Копия деталей без треугольников, центроид которых попадает в cut(x, y, z) (вырез окон кабины)
+export function carveParts(parts, cut) {
+  const out = [];
+  for (const p of parts) {
+    const g = p.geometry;
+    if (!g.index) { out.push(p); continue; }
+    const pos = g.attributes.position, idx = g.index.array, keep = [];
+    for (let t = 0; t < idx.length; t += 3) {
+      const a = idx[t], b = idx[t + 1], c = idx[t + 2];
+      const x = (pos.getX(a) + pos.getX(b) + pos.getX(c)) / 3, y = (pos.getY(a) + pos.getY(b) + pos.getY(c)) / 3, z = (pos.getZ(a) + pos.getZ(b) + pos.getZ(c)) / 3;
+      if (!cut(x, y, z)) keep.push(a, b, c);
+    }
+    if (!keep.length) continue;
+    const ng = new THREE.BufferGeometry();
+    for (const [name, attr] of Object.entries(g.attributes)) ng.setAttribute(name, attr);
+    ng.setIndex(keep);
+    out.push({ geometry: ng, material: p.material, name: p.name });
+  }
+  return out;
+}
+
 export function instantiate(pieceParts, opts) { return toGroup(pieceParts.map((p) => ({ ...p })), opts); }
 
 // ── светофор ──

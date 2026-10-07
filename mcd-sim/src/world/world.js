@@ -22,8 +22,8 @@ export class World {
     scene.add(this.root);
     // дальний фон — большая плоскость под камерой
     const winter = season === 'winter';
-    const gm = assets.pbr(winter ? 'snow_02' : season === 'autumn' ? 'forest_ground_04' : 'sparse_grass', { repeat: 1 }).clone();
-    for (const k of ['map', 'normalMap', 'roughnessMap', 'aoMap', 'metalnessMap']) if (gm[k]) { gm[k] = gm[k].clone(); gm[k].repeat.set(400, 400); gm[k].needsUpdate = true; }
+    const gm = assets.pbr(winter ? 'snow_02' : 'leafy_grass', { repeat: 1, color: winter ? 0xffffff : season === 'autumn' ? 0xd9c08a : 0x8fc06a }).clone();
+    for (const k of ['map', 'normalMap', 'roughnessMap', 'aoMap', 'metalnessMap']) if (gm[k]) { gm[k] = gm[k].clone(); gm[k].repeat.set(1200, 1200); gm[k].needsUpdate = true; }
     gm.polygonOffset = true; gm.polygonOffsetFactor = 4; gm.polygonOffsetUnits = 4;
     this.ground = new THREE.Mesh(new THREE.PlaneGeometry(6000, 6000), gm);
     this.ground.rotation.x = -Math.PI / 2;

@@ -42,8 +42,8 @@ function sharedRes(season) {
   const railSide = assets.pbr('rusty_metal', { repeat: 1, color: 0x8a6a55, roughness: 0.9, side: THREE.DoubleSide });
   const railHead = new THREE.MeshStandardMaterial({ color: 0xc9cdd2, roughness: 0.22, metalness: 1.0 });
   const ballast = assets.pbr(winter ? 'snow_02' : 'gravel_stones', { repeat: 1, color: winter ? 0xf2f4f8 : 0xb9b2a8, normalScale: 1.4 });
-  const nearGround = assets.pbr(winter ? 'snow_02' : 'withered_grass', { repeat: 1 }).clone();
-  const farGround = assets.pbr(winter ? 'snow_02' : season === 'autumn' ? 'forest_ground_04' : 'sparse_grass', { repeat: 1 }).clone();
+  const nearGround = assets.pbr(winter ? 'snow_02' : 'grass_path_2', { repeat: 1 }).clone();
+  const farGround = assets.pbr(winter ? 'snow_02' : 'leafy_grass', { repeat: 1 }).clone();
   nearGround.vertexColors = true; farGround.vertexColors = true;
   ballast.vertexColors = false;
   shared = { season, railProfile, sleeper: sl, clips, concrete, fastening, railSide, railHead, ballast, nearGround, farGround };
@@ -62,8 +62,10 @@ export function groundColor(x, z, season) {
   const n = vnoise(x / 60, z / 60) * 0.6 + vnoise(x / 17, z / 17) * 0.4;
   const m = vnoise(x / 230 + 7, z / 230 + 3);
   if (season === 'winter') { const k = 0.9 + n * 0.12; return [k, k, k * 1.02]; }
-  const dry = Math.max(0, m - 0.45) * 1.6;
-  return [0.78 + n * 0.32 + dry * 0.25, 0.86 + n * 0.22 + dry * 0.1, 0.72 + n * 0.18 - dry * 0.12];
+  const dry = Math.max(0, m - 0.5) * 1.4;
+  if (season === 'autumn') return [0.95 + n * 0.2 + dry * 0.2, 0.85 + n * 0.15, 0.6 + n * 0.1];
+  // летом подкрашиваем в зелёный, сухие пятна — желтее
+  return [0.62 + n * 0.22 + dry * 0.35, 0.95 + n * 0.25 + dry * 0.1, 0.48 + n * 0.14 - dry * 0.1];
 }
 
 export function terrainH(route, s, lat) {

@@ -46,7 +46,7 @@ function makeImpostor(obj) {
   renderer.setRenderTarget(prevTarget);
   renderer.setClearColor(0x000000, prevClear);
   renderer.toneMapping = env;
-  const mat = new THREE.MeshStandardMaterial({ map: rt.texture, alphaTest: 0.45, side: THREE.DoubleSide, roughness: 0.9, metalness: 0 });
+  const mat = new THREE.MeshStandardMaterial({ map: rt.texture, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.95, metalness: 0, color: 0xb8c4a8 });
   const q1 = new THREE.PlaneGeometry(w, h); q1.translate(0, h / 2 + box.min.y, 0);
   const q2 = q1.clone(); q2.rotateY(Math.PI / 2);
   const geo = mergeGeoms([q1, q2]);

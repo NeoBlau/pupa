@@ -22,7 +22,7 @@ export const MODELS = [
 // PBR-текстуры (Poly Haven, CC0): diff + nor_gl + arm (AO/Rough/Metal).
 export const TEXTURES = [
   'gravel_stones', 'rocky_gravel', 'sparse_grass', 'forest_ground_04', 'withered_grass',
-  'square_concrete_pavers', 'anti_slip_concrete', 'concrete_panels', 'concrete_tile_facade',
+  'square_concrete_pavers', 'anti_slip_concrete', 'concrete_panels', 'concrete_tile_facade', 'leafy_grass', 'grass_path_2', 'aerial_grass_rock',
   'precast_concrete_wall', 'red_brick', 'box_profile_metal_sheet', 'corrugated_iron_02', 'metal_plate',
   'rusty_metal', 'rough_concrete', 'asphalt_02', 'snow_02', 'factory_wall', 'brushed_concrete',
 ];

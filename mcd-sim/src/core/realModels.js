@@ -62,9 +62,10 @@ function compact(g) {
   for (let i = 0; i < idx.length; i++) { const v = idx[i]; if (remap[v] < 0) remap[v] = m++; out[i] = remap[v]; }
   const ng = new THREE.BufferGeometry();
   for (const [name, attr] of Object.entries(g.attributes)) {
-    const k = attr.itemSize; const src = attr.array; const dst = new src.constructor(m * k);
-    for (let v = 0; v < n; v++) if (remap[v] >= 0) for (let j = 0; j < k; j++) dst[remap[v] * k + j] = src[v * k + j];
-    ng.setAttribute(name, new THREE.BufferAttribute(dst, k, attr.normalized));
+    // атрибуты могут быть чередующимися (InterleavedBufferAttribute) — читаем через getComponent
+    const k = attr.itemSize; const dst = new Float32Array(m * k);
+    for (let v = 0; v < n; v++) if (remap[v] >= 0) for (let j = 0; j < k; j++) dst[remap[v] * k + j] = attr.getComponent(v, j);
+    ng.setAttribute(name, new THREE.BufferAttribute(dst, k, false));
   }
   ng.setIndex(new THREE.BufferAttribute(m > 65535 ? out : new Uint16Array(out), 1));
   return ng;

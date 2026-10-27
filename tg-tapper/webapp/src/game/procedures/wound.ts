@@ -80,6 +80,7 @@ export function woundProcedure(e: Engine): Procedure {
           ouchCd = 0.9;
           penalty++;
           e.kick(w.p, 200 * e.u, 0.15);
+          e.react('pain', 1);
           e.shake(10);
           e.floatText(w.p, 'Ouch! Not on it', '#ff7b7b', 22);
           e.hooks.sfx('ouch');
@@ -92,6 +93,7 @@ export function woundProcedure(e: Engine): Procedure {
       e.press(e.ptr.p, 70 * e.u, 0.0025);
       e.force(e.ptr.p, 80 * e.u, w.p.clone().sub(e.ptr.p).normalize().multiplyScalar(0.0015));
       pus = Math.max(0, pus - dt * 0.22);
+      if (Math.random() < dt * 1.5) e.react('sting', 0.2 + (1 - d / (R * 2.4)) * 0.3);
       e.work(dt * 10);
       oozeT += dt;
       if (oozeT > 0.12) {
@@ -152,6 +154,7 @@ export function woundProcedure(e: Engine): Procedure {
       fizzT += dt;
       e.work(dt * 6);
       fizz(e, w, 0.008, Math.random() < 0.4 ? 0xffd9e0 : 0xffffff);
+      if (Math.random() < 0.05) e.react('sting', 0.35);
       if (Math.random() < 0.5) e.stamp('foam', w.p.clone().add(new THREE.Vector3(rand(-1, 1) * 0.006, rand(-1, 1) * 0.005, 0)), rand(14, 26) * e.u, { tex: 'foam', alpha: 0.7 });
       e.hooks.haptic('tick');
     },

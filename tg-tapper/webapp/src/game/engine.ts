@@ -9,7 +9,6 @@ import { loadScan, proceduralFoot, type FootAsset } from './foot.ts';
 import { Paint, patchSkinMaterial, type LayerId, type StampOpts } from './paint.ts';
 import { loadMaterials, type Materials } from './materials.ts';
 import { createTool, type ToolName } from './tools3d.ts';
-import { roundedSlab } from './geom.ts';
 
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
@@ -248,28 +247,19 @@ export class Engine {
     const fill = new THREE.HemisphereLight(0xcab8ff, 0x1a0e14, 0.35);
     this.scene.add(key, key.target, rim, fill, this.root);
 
-    // Velvet couch the leg rests on + a towel under the heel + tool tray.
+    // Velvet couch the leg rests on (receives the foot's shadow).
     const couch = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 2.4), this.M.velvet);
     couch.position.set(0, 0.1, -0.17);
     couch.receiveShadow = true;
-    const towel = new THREE.Mesh(roundedSlab(0.34, 0.2, 0.012, 0.006), this.M.terry);
-    towel.position.set(0.01, -0.035, -0.12);
-    towel.rotation.x = -Math.PI / 2 + 0.25;
-    towel.receiveShadow = true;
-    towel.castShadow = true;
-    const tray = new THREE.Mesh(roundedSlab(0.16, 0.38, 0.01, 0.006), this.M.marble);
-    tray.position.set(0.19, 0.12, -0.16);
-    tray.rotation.x = 0;
-    tray.receiveShadow = true;
-    this.root.add(couch, towel, tray, this.footGroup);
+    this.root.add(couch, this.footGroup);
 
-    this.camera.position.set(0, 0.12, 0.48);
+    this.camera.position.set(0.17, 0.04, 0.6);
     this.controls = new OrbitControls(this.camera, r.domElement);
-    this.controls.target.set(0, 0.12, -0.02);
+    this.controls.target.set(0.02, 0.105, -0.02);
     this.controls.enableDamping = true;
     this.controls.enablePan = false;
     this.controls.minDistance = 0.22;
-    this.controls.maxDistance = 0.75;
+    this.controls.maxDistance = 0.85;
     this.controls.minAzimuthAngle = -1.1;
     this.controls.maxAzimuthAngle = 1.1;
     this.controls.minPolarAngle = 0.5;
@@ -297,7 +287,7 @@ export class Engine {
 
   resetCamera() {
     const from = this.camera.position.clone();
-    const to = new THREE.Vector3(0, 0.12, 0.48);
+    const to = new THREE.Vector3(0.17, 0.04, 0.6);
     this.tween(0.5, (k) => this.camera.position.lerpVectors(from, to, ease.inOut(k)));
   }
 
@@ -355,9 +345,9 @@ export class Engine {
         asset = await loadScan(def.scan, def.scanRotation);
       } catch (e) {
         console.warn('Scan failed, using procedural foot', e);
-        asset = proceduralFoot(def, this.renderer);
+        asset = await proceduralFoot(def, this.renderer);
       }
-    } else asset = proceduralFoot(def, this.renderer);
+    } else asset = await proceduralFoot(def, this.renderer);
     this.asset = asset;
     this.u = asset.length / 1160;
     this.L = asset.landmarks;
@@ -406,6 +396,160 @@ export class Engine {
       list.push(i);
     }
     this.extraRest = asset.extras.map((x) => ({ o: x, p: x.position.clone(), vi: this.nearestVertex(x.position) }));
+
+    // Vertices of each toe, weighted 0 at the joint → 1 toward the tip, for curling.
+    // Every vertex belongs to its nearest toe only, so touching toes never tear apart.
+    this.ankle = asset.ankle;
+    const toes = asset.toes.map((t) => {
+      const dir = t.b.clone().sub(t.a);
+      const len = dir.length();
+      return { t, dir: dir.normalize(), len, idx: [] as number[], w: [] as number[] };
+    });
+    const v = new THREE.Vector3();
+    for (let i = 0; i < pos.length / 3 && toes.length; i++) {
+      let best = -1;
+      let bestD = Infinity;
+      let bestS = 0;
+      for (let k = 0; k < toes.length; k++) {
+        const T = toes[k];
+        v.set(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]).sub(T.t.a);
+        const along = v.dot(T.dir);
+        const h = Math.max(0, Math.min(T.len, along));
+        const d = Math.sqrt(Math.max(0, v.lengthSq() - 2 * along * h + h * h)) / T.t.r;
+        if (d < bestD) {
+          bestD = d;
+          best = k;
+          bestS = along / T.len;
+        }
+      }
+      if (best < 0 || bestD > 2) continue;
+      const k = THREE.MathUtils.smoothstep(bestS, -0.45, 0.3) * (1 - THREE.MathUtils.smoothstep(bestD, 1.3, 2));
+      if (k < 0.01) continue;
+      toes[best].idx.push(i);
+      toes[best].w.push(k);
+    }
+    this.toeVerts = toes.map((T) => ({ a: T.t.a.clone(), idx: Int32Array.from(T.idx), w: Float32Array.from(T.w) }));
+
+    // Normals: smooth analytic normals + (deformed − rest) face normals, so the
+    // irregular marching-cubes triangulation never shows up as faceting.
+    const rest = g.clone();
+    rest.computeVertexNormals();
+    this.restFaceN = Float32Array.from(rest.attributes.normal.array as Float32Array);
+    rest.dispose();
+    this.rx = { curl: new Float32Array(5), curlT: new Float32Array(5), spread: 0, spreadT: 0, pull: 0, pullT: 0, flex: 0, flexT: 0, active: false };
+  }
+
+  // -------------------------------------------------------------------------
+  // Reactions: toes clench, wiggle or fan out; the foot flinches away.
+
+  private toeVerts: { a: THREE.Vector3; idx: Int32Array; w: Float32Array }[] = [];
+  private restFaceN = new Float32Array(0);
+  /** Per-toe wiggle phase while tickled. */
+  private wiggle = 0;
+  private ankle = new THREE.Vector3();
+  private rx = { curl: new Float32Array(5), curlT: new Float32Array(5), spread: 0, spreadT: 0, pull: 0, pullT: 0, flex: 0, flexT: 0, active: false };
+
+  react(kind: 'pain' | 'tickle' | 'sting' | 'cold' | 'pleasure', strength = 1) {
+    const R = this.rx;
+    const s = Math.max(0, Math.min(1, strength));
+    const curl = (amt: (i: number) => number) => {
+      for (let i = 0; i < 5; i++) R.curlT[i] = Math.max(R.curlT[i], amt(i));
+    };
+    switch (kind) {
+      case 'pain':
+        curl(() => s);
+        R.pullT = Math.max(R.pullT, 0.022 * s);
+        R.flexT = Math.max(R.flexT, 0.22 * s);
+        R.spreadT = 0;
+        this.kick(this.L.heel, 0.03, 0.05 * s);
+        break;
+      case 'tickle':
+        this.wiggle = Math.max(this.wiggle, s);
+        curl(() => s * (0.2 + Math.random() * 0.6));
+        R.pullT = Math.max(R.pullT, 0.007 * s * Math.random());
+        R.flexT = Math.max(R.flexT, 0.1 * s * Math.random());
+        R.spreadT = 0;
+        break;
+      case 'sting':
+        curl(() => 0.55 * s);
+        R.pullT = Math.max(R.pullT, 0.006 * s);
+        R.flexT = Math.max(R.flexT, 0.05 * s);
+        break;
+      case 'cold':
+        curl(() => 0.7 * s);
+        R.pullT = Math.max(R.pullT, 0.004 * s);
+        break;
+      case 'pleasure':
+        R.spreadT = Math.max(R.spreadT, 0.8 * s);
+        curl(() => 0.18 * s);
+        break;
+    }
+    R.active = true;
+    this.moving = true;
+  }
+
+  private applyReactions(dt: number) {
+    const R = this.rx;
+    if (!R.active) return;
+    const approach = (v: number, t: number) => v + (t - v) * Math.min(1, dt * (t > v ? 16 : 4));
+    let energy = 0;
+    for (let i = 0; i < 5; i++) {
+      R.curl[i] = approach(R.curl[i], R.curlT[i]);
+      R.curlT[i] *= Math.exp(-dt * 2.2);
+      energy += R.curl[i] + R.curlT[i];
+    }
+    this.wiggle *= Math.exp(-dt * 2.5);
+    energy += this.wiggle;
+    R.spread = approach(R.spread, R.spreadT);
+    R.spreadT *= Math.exp(-dt * 1);
+    R.pull = approach(R.pull, R.pullT);
+    R.pullT *= Math.exp(-dt * 4);
+    R.flex = approach(R.flex, R.flexT);
+    R.flexT *= Math.exp(-dt * 3);
+    energy += Math.abs(R.spread) + R.spreadT + R.pull * 50 + R.flex * 5;
+    if (energy < 1e-3) {
+      R.active = false;
+      return;
+    }
+    const { base, target } = this;
+    // Toes: flex toward the sole (rotation about X at the joint) and fan out (about Z).
+    this.toeVerts.forEach((t, i) => {
+      const ang = R.curl[i] * 0.6;
+      const spr = R.spread * (i - 1.6) * 0.09;
+      const c = Math.cos(ang);
+      const sn = Math.sin(ang);
+      const cs = Math.cos(spr);
+      const ss = Math.sin(spr);
+      for (let k = 0; k < t.idx.length; k++) {
+        const vi = t.idx[k] * 3;
+        const w = t.w[k];
+        const dx = base[vi] - t.a.x;
+        const dy = base[vi + 1] - t.a.y;
+        const dz = base[vi + 2] - t.a.z;
+        const y1 = dy * c - dz * sn;
+        const z1 = dy * sn + dz * c;
+        const x2 = dx * cs - y1 * ss;
+        const y2 = dx * ss + y1 * cs;
+        target[vi] += (x2 - dx) * w;
+        target[vi + 1] += (y2 - dy) * w;
+        target[vi + 2] += (z1 - dz) * w;
+      }
+    });
+    // Whole foot: pulls away from the hand and plantar-flexes around the ankle.
+    if (R.pull > 1e-5 || R.flex > 1e-4) {
+      const P = this.ankle;
+      const c = Math.cos(-R.flex);
+      const sn = Math.sin(-R.flex);
+      for (let i = 0; i < base.length; i += 3) {
+        const w = THREE.MathUtils.smoothstep(base[i + 2], -0.15, -0.09);
+        if (w <= 0) continue;
+        const dy = base[i + 1] - P.y;
+        const dz = base[i + 2] - P.z;
+        target[i + 1] += (P.y + dy * c - dz * sn - base[i + 1]) * w;
+        target[i + 2] += (P.z + dy * sn + dz * c - base[i + 2] - R.pull) * w;
+      }
+    }
+    this.moving = true;
   }
 
   private extraRest: { o: THREE.Object3D; p: THREE.Vector3; vi: number }[] = [];
@@ -724,16 +868,18 @@ export class Engine {
     }
   }
 
+  /** A coherent twitch: the whole area jerks in one random direction (never crumples the skin). */
   kick(p: THREE.Vector3, r: number, amount: number) {
     const { base, vel } = this;
     const r2 = r * r;
+    const dir = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize().multiplyScalar(amount);
     for (let i = 0; i < base.length; i += 3) {
       const d2 = (base[i] - p.x) ** 2 + (base[i + 1] - p.y) ** 2 + (base[i + 2] - p.z) ** 2;
       if (d2 > r2 * 4) continue;
       const f = Math.exp(-d2 / r2);
-      vel[i] += (Math.random() - 0.5) * amount * f;
-      vel[i + 1] += (Math.random() - 0.5) * amount * f;
-      vel[i + 2] += (Math.random() - 0.5) * amount * f;
+      vel[i] += dir.x * f;
+      vel[i + 1] += dir.y * f;
+      vel[i + 2] += dir.z * f;
       this.moving = true;
     }
   }
@@ -745,8 +891,9 @@ export class Engine {
 
   private updateSkin(dt: number) {
     const { base, baseN, off, vel, target, forces } = this;
-    if (!forces.length && !this.moving) return;
+    if (!forces.length && !this.moving && !this.rx.active) return;
     target.fill(0);
+    this.applyReactions(dt);
     for (const f of forces) {
       const r2 = f.r * f.r;
       for (let i = 0; i < base.length; i += 3) {
@@ -776,6 +923,19 @@ export class Engine {
     for (let i = 0; i < base.length; i++) arr[i] = base[i] + off[i];
     pos.needsUpdate = true;
     this.foot.geometry.computeVertexNormals();
+    const nAttr = this.foot.geometry.attributes.normal;
+    const nArr = nAttr.array as Float32Array;
+    const rf = this.restFaceN;
+    for (let i = 0; i < nArr.length; i += 3) {
+      const x = baseN[i] + nArr[i] - rf[i];
+      const y = baseN[i + 1] + nArr[i + 1] - rf[i + 1];
+      const z = baseN[i + 2] + nArr[i + 2] - rf[i + 2];
+      const l = Math.sqrt(x * x + y * y + z * z) || 1;
+      nArr[i] = x / l;
+      nArr[i + 1] = y / l;
+      nArr[i + 2] = z / l;
+    }
+    nAttr.needsUpdate = true;
     for (const x of this.extraRest) x.o.position.copy(x.p).add(this.skinOffset(x.vi, tmpV));
   }
 

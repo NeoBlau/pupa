@@ -85,6 +85,7 @@ export function oilProcedure(e: Engine): Procedure {
       const d = p.delta.length();
       if (oiled) {
         kneaded += d;
+        if (Math.random() < 0.05) e.react('pleasure', 0.7);
         e.work(d / (55 * e.u));
         if (Math.random() < 0.06) e.particle('heart', p.p.clone().addScaledVector(p.n, 0.01), 0.005, { v: p.n.clone().multiplyScalar(0.03).add(new THREE.Vector3(0, 0.02, 0)), max: 0.9, spin: 0.5 });
       }
@@ -226,6 +227,7 @@ export function tickleProcedure(e: Engine): Procedure {
         if (twitchT > 0.14) {
           twitchT = 0;
           e.kick(e.ptr.p, 200 * e.u, 0.09 * energy);
+          e.react('tickle', 0.4 + energy * 0.6);
           if (energy > 0.6 && Math.random() < 0.3) e.shake(6 * energy);
         }
         // toes curl toward the sole

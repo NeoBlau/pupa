@@ -22,6 +22,11 @@ export interface ModelDef {
   scanRotation?: [number, number, number];
   /** Skin tone of the procedural foot. */
   skin: string;
+  /**
+   * Real skin detail baked from a sole photo into the foot's UV space (see README):
+   * `height` = creases & pores (used for relief), `albedo` = the photo's colour.
+   */
+  sole?: { albedo?: string; height: string; outline?: string };
   /** Acupuncture points on the foot in metres (foot space). Random sole points if omitted. */
   acupoints?: [number, number, number][];
   /** Photos shown in the model card carousel. */
@@ -31,12 +36,15 @@ export interface ModelDef {
   galleryLevels: number[];
 }
 
-const m = (id: string, name: string, unlockCost: number, baseMult: number, skin: string): ModelDef => ({
+const SOLE_HEIGHT = 'skin/sole_height.webp';
+
+const m = (id: string, name: string, unlockCost: number, baseMult: number, skin: string, albedo?: string): ModelDef => ({
   id,
   name,
   unlockCost,
   baseMult,
   skin,
+  sole: { albedo, height: SOLE_HEIGHT, outline: 'skin/sole_outline.json' },
   cover: [`models/${id}/cover1.svg`, `models/${id}/cover2.svg`, `models/${id}/cover3.svg`],
   gallery: [`models/${id}/g1.svg`, `models/${id}/g2.svg`, `models/${id}/g3.svg`],
   galleryLevels: [2, 5, 10],
@@ -44,7 +52,7 @@ const m = (id: string, name: string, unlockCost: number, baseMult: number, skin:
 
 // Cover/gallery .svg files are placeholders: replace them with your photos (see README).
 export const MODELS: ModelDef[] = [
-  m('anna', 'Anna', 0, 1, '#f0c3a6'),
+  m('anna', 'Anna', 0, 1, '#c18c6d', 'skin/sole_albedo.webp'),
   m('kate', 'Kate', 20_000, 1.5, '#f5cfb6'),
   m('kim', 'Kim', 50_000, 2.2, '#eec7a1'),
   m('tiffany', 'Tiffany', 50_000, 2.2, '#8e5a3b'),

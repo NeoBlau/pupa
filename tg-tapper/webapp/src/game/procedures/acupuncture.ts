@@ -91,6 +91,7 @@ export function acupunctureProcedure(e: Engine, ctx: ProcCtx): Procedure {
           e.ripple(p.p, 0x7cf7ff, 0.008);
           e.impulse(p.p, 35 * e.u, 0.06);
           e.hooks.sfx('needle');
+          e.react(quality < 0.35 ? 'pain' : 'sting', quality < 0.35 ? 1 : 0.3);
           e.hooks.haptic('medium');
           e.work(4 + quality * 6);
           if (quality > 0.75) e.floatText(p.p, 'Perfect', '#7cf7ff');
@@ -190,6 +191,7 @@ export function acupunctureProcedure(e: Engine, ctx: ProcCtx): Procedure {
         );
         e.impulse(p.p, 60 * e.u, -0.08);
         e.hooks.sfx('pop');
+        e.react('sting', 0.25);
         e.hooks.haptic('light');
         e.work(5);
         const last = pts.every((q) => q.removed);
@@ -286,6 +288,7 @@ export function acupunctureProcedure(e: Engine, ctx: ProcCtx): Procedure {
           if (d.trickle) d.trickle.treated = true;
           // Peroxide foams pink on blood.
           fizz(e, e.ptr, 0.004, 0xffc9d2);
+          if (Math.random() < 0.08) e.react('sting', 0.3);
           e.stamp('foam', e.ptr.uv, 14 * e.u, { tex: 'foam', alpha: 0.25 });
           e.work(dt * 6);
         }

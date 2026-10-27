@@ -177,6 +177,8 @@ export function tattooProcedure(e: Engine, ctx: ProcCtx): Procedure {
   let travel = 0;
   const machineFx = (p: { p: THREE.Vector3; n: THREE.Vector3; uv: THREE.Vector2; delta: THREE.Vector3 }, d: number) => {
     travel += d;
+    // The needle stings: toes twitch now and then.
+    if (Math.random() < 0.04) e.react('sting', 0.25);
     e.force(p.p, 80 * e.u, p.delta.clone().multiplyScalar(0.15));
     e.press(p.p, 25 * e.u, 0.0005);
     e.stamp('redness', p.uv, 34 * e.u, { alpha: 0.05 });
@@ -431,6 +433,7 @@ export function removalProcedure(e: Engine, ctx: ProcCtx): Procedure {
       const { p, uv } = e.ptr;
       e.particle('sparkle', p.clone().addScaledVector(e.ptr.n, 0.001), 0.012, { add: true, max: 0.12, tint: 0xdff8ff });
       e.hooks.sfx('zap');
+      if (Math.random() < 0.3) e.react('sting', 0.35);
       e.hooks.haptic('light');
       const c = e.paint.cellOf(uv.x, uv.y);
       if (c < 0 || inkAt(c) < 0.12) return;
@@ -461,6 +464,7 @@ export function removalProcedure(e: Engine, ctx: ProcCtx): Procedure {
     region: area,
     onUpdate(dt) {
       e.fadeLayer('frost', dt * 0.2);
+      if (e.ptr.down && Math.random() < dt * 0.8) e.react('cold', 0.5);
     },
   });
 

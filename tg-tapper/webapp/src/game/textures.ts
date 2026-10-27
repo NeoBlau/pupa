@@ -1,6 +1,5 @@
-// Procedural textures drawn with Canvas2D, so the prototype runs without art assets.
-// Any of these can be swapped for a PNG later: Assets.load('tools/needle.png').
-import { Texture } from 'pixi.js';
+// Procedural textures drawn with Canvas2D, so the game runs without art assets.
+// Used as sprite textures in 3D, as decals, and as DOM cursors for tools.
 
 type Draw = (c: CanvasRenderingContext2D, w: number, h: number) => void;
 
@@ -10,7 +9,7 @@ function make(w: number, h: number, draw: Draw) {
   cv.height = h;
   const c = cv.getContext('2d')!;
   draw(c, w, h);
-  return Texture.from(cv);
+  return cv;
 }
 
 const rad = (c: CanvasRenderingContext2D, x: number, y: number, r: number, stops: [number, string][]) => {

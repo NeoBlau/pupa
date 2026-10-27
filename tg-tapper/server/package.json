@@ -1,0 +1,10 @@
+{
+  "name": "tg-tapper-server",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.18" },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/index.ts",
+    "dev": "node --disable-warning=ExperimentalWarning --watch src/index.ts"
+  }
+}

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="800" viewBox="0 0 600 800">
+<defs><radialGradient id="g" cx="70%" cy="30%" r="90%"><stop offset="0" stop-color="#1d1f4a"/><stop offset="1" stop-color="#09091a"/></radialGradient>
+<filter id="b"><feGaussianBlur stdDeviation="30"/></filter></defs>
+<rect width="600" height="800" fill="url(#g)"/>
+<g filter="url(#b)"><ellipse cx="360.00000000000006" cy="440.00000000000006" rx="168.00000000000003" ry="256" fill="#f6d0b8" opacity="0.75"/><circle cx="450" cy="200" r="90" fill="#ec4899" opacity="0.35"/></g>
+<text x="50%" y="688" text-anchor="middle" font-family="sans-serif" font-size="48" font-weight="800" fill="#fff" opacity="0.9">Kate</text>
+<text x="50%" y="744" text-anchor="middle" font-family="sans-serif" font-size="24" fill="#fff" opacity="0.55">gallery 3</text>
+</svg>

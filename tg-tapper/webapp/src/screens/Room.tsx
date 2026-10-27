@@ -21,6 +21,8 @@ import { loop, sfx } from '../sound.ts';
 export function Room({ active }: { active: boolean }) {
   const s = useStore();
   const host = useRef<HTMLDivElement>(null);
+  const overlay = useRef<HTMLDivElement>(null);
+  const [loadPct, setLoadPct] = useState(0);
   const engine = useRef<Engine | null>(null);
   const [view, setView] = useState<StepView | null>(null);
   const [mode, setMode] = useState<'spa' | 'clinic'>('spa');
@@ -28,7 +30,7 @@ export function Room({ active }: { active: boolean }) {
   const [loaded, setLoaded] = useState('');
   const model = modelById(s.state.selected)!;
 
-  // Create the Pixi engine once.
+  // Create the 3D engine once.
   useEffect(() => {
     const e = new Engine({
       onWork: (u) => {
@@ -40,11 +42,12 @@ export function Room({ active }: { active: boolean }) {
       sfx: (n) => store.soundOn && sfx(n),
       loop: (n, on) => (store.soundOn || !on) && loop(n, on),
       haptic,
+      onLoad: (k) => setLoadPct(Math.round(k * 100)),
     });
     engine.current = e;
     if (location.search.includes('debug')) (window as unknown as { __engine: Engine }).__engine = e;
     let alive = true;
-    void e.init(host.current!).then(() => {
+    void e.init(host.current!, overlay.current!).then(() => {
       if (!alive) e.destroy();
     });
     return () => {
@@ -61,6 +64,8 @@ export function Room({ active }: { active: boolean }) {
     const go = async () => {
       while (!e.ready) await new Promise((r) => setTimeout(r, 30));
       if (cancelled) return;
+      setLoadPct(85);
+      await new Promise((r) => setTimeout(r, 30));
       await e.loadModel(model);
       const t = store.getTattoo(model.id);
       if (t) restoreTattoo(e, t);
@@ -76,8 +81,7 @@ export function Room({ active }: { active: boolean }) {
   useEffect(() => {
     const e = engine.current;
     if (!e?.ready) return;
-    if (active) e.app.ticker.start();
-    else e.app.ticker.stop();
+    e.setRunning(active);
   }, [active, loaded]);
 
   // Meter decay.
@@ -126,7 +130,15 @@ export function Room({ active }: { active: boolean }) {
   return (
     <div className={`room ${active ? '' : 'hidden'}`}>
       <div className="canvas-host" ref={host} />
-      {loaded !== model.id && <div className="room-loading">Preparing the room…</div>}
+      <div className="float-layer" ref={overlay} />
+      {loaded !== model.id && (
+        <div className="room-loading">
+          <div>Preparing the room… {loadPct}%</div>
+          <div className="bar small" style={{ width: 200 }}>
+            <i style={{ width: `${loadPct}%` }} />
+          </div>
+        </div>
+      )}
 
       <div className="room-top">
         <div className="model-tag">
@@ -192,6 +204,9 @@ export function Room({ active }: { active: boolean }) {
         ))}
         <button className="round" onClick={() => setHelp(true)}>
           ?
+        </button>
+        <button className="round" onClick={() => engine.current?.resetCamera()} title="Reset view">
+          🎥
         </button>
         <button className="round" onClick={() => s.setSound(!s.soundOn)}>
           {s.soundOn ? '🔊' : '🔇'}
@@ -316,7 +331,10 @@ function Help({ mode, onClose }: { mode: 'spa' | 'clinic'; onClose: () => void }
       <div className="sheet" onClick={(e) => e.stopPropagation()}>
         <h3>How to play</h3>
         {mode === 'spa' ? (
-          <p>Pick a procedure and follow the steps at the top. Spa work fills her mood meter — every stage multiplies your coins, and reaching the top pays a big bonus.</p>
+          <>
+            <p>Pick a procedure and follow the steps at the top. Spa work fills her mood meter — every stage multiplies your coins, and reaching the top pays a big bonus.</p>
+            <p className="muted">One finger / left mouse — use the tool. Two fingers / right mouse — rotate and zoom the camera.</p>
+          </>
         ) : (
           <>
             <p>Clinic procedures follow real-world order: clean → treat → aftercare → dressing. Precision and gentle handling raise your bonus (up to x2).</p>

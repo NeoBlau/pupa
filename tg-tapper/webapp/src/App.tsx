@@ -35,7 +35,7 @@ function Loading({ onDone }: { onDone: () => void }) {
       await store.load();
       setP(0.4);
       const m = modelById(store.state.selected) ?? MODELS[0];
-      const imgs = [m.room, m.mask, ...MODELS.map((x) => x.cover[0])].filter(Boolean) as string[];
+      const imgs = [...MODELS.map((x) => x.cover[0]), m.cover[1]];
       let n = 0;
       await Promise.all(imgs.map((src) => preload(src).then(() => setP(0.4 + 0.55 * (++n / imgs.length)))));
       await document.fonts?.ready;

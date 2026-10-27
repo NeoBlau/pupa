@@ -23,7 +23,7 @@ const SLOTS: Record<LayerId, [number, number]> = {
 
 const CHANNEL = [new THREE.Vector4(1, 0, 0, 0), new THREE.Vector4(0, 1, 0, 0), new THREE.Vector4(0, 0, 1, 0), new THREE.Vector4(0, 0, 0, 1)];
 
-const RT_SIZE = 1024;
+const RT_SIZE = 2048;
 export const GRID = 64;
 
 const vert = /* glsl */ `

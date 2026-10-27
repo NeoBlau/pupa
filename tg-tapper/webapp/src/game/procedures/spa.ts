@@ -1,5 +1,6 @@
+import * as THREE from 'three';
 import type { Engine, Procedure, Step } from '../engine.ts';
-import { clamp01, rand, rubStep, spray } from './common.ts';
+import { clamp01, clampLen, downhill, rand, rubStep, spray } from './common.ts';
 
 export function oilProcedure(e: Engine): Procedure {
   let drops = 0;
@@ -7,36 +8,42 @@ export function oilProcedure(e: Engine): Procedure {
 
   const pour: Step = {
     title: 'Pour',
-    hint: 'Hold to drip warm oil onto her feet',
+    hint: 'Hold to drip warm oil onto her sole',
     cursor: 'bottle',
     enter() {
       drops = 0;
     },
     update(dt) {
-      if (!e.ptr.down) return;
+      e.toolPose.lift = 0.02;
+      if (!e.ptr.down || !e.ptr.hit) return;
       pourT += dt;
       if (pourT < 0.16) return;
       pourT = 0;
-      const x = e.ptr.x + rand(-6, 6) * e.u;
-      const y = e.ptr.y + rand(-6, 6) * e.u;
-      // A drop falls toward the skin (shrinks), then splats into the oil layer.
-      e.particle('water', x, y, 34 * e.u, {
-        tint: 0xffc24a,
-        grow: -1.6,
-        max: 0.22,
-        fade: false,
-        rot: 0,
-        onEnd: () => {
-          e.stamp('oil', x, y, 46 * e.u, { alpha: 0.8 });
-          e.stamp('oil', x + rand(-20, 20) * e.u, y + rand(0, 30) * e.u, 26 * e.u, { alpha: 0.6 });
-          e.pinch(x, y, 40 * e.u, 0.08);
-          e.ripple(x, y, 0xffe2a0, 30);
+      const land = e.surfaceAt(e.ptr.p.clone().add(new THREE.Vector3(rand(-1.5, 1.5) * 0.001, rand(-1.5, 1.5) * 0.001, 0)));
+      if (!land) return;
+      // A glossy drop falls from the nozzle and splats into the oil layer.
+      const drop = new THREE.Mesh(new THREE.SphereGeometry(0.0016, 16, 12), e.M.oil);
+      drop.scale.y = 1.4;
+      const from = land.p.clone().addScaledVector(land.n, 0.02);
+      drop.position.copy(from);
+      e.root.add(drop);
+      e.tween(
+        0.2,
+        (k) => drop.position.lerpVectors(from, land.p, k * k),
+        () => {
+          drop.removeFromParent();
+          drop.geometry.dispose();
+          e.stamp('oil', land.uv, 46 * e.u, { alpha: 0.8 });
+          const run = land.p.clone().addScaledVector(downhill(land.n), rand(0.002, 0.006));
+          e.stamp('oil', run, 26 * e.u, { alpha: 0.6 });
+          e.impulse(land.p, 40 * e.u, 0.05);
+          e.ripple(land.p, 0xffe2a0, 0.006);
           e.hooks.sfx('drop');
           e.hooks.haptic('tick');
           drops++;
           e.work(2);
         },
-      });
+      );
     },
     progress: () => clamp01(drops / 10),
   };
@@ -53,7 +60,8 @@ export function oilProcedure(e: Engine): Procedure {
     drag: 0.5,
     loop: 'rub',
     onMove(p) {
-      if (Math.random() < 0.25) e.particle('sparkle', p.x + rand(-60, 60) * e.u, p.y + rand(-60, 60) * e.u, rand(10, 22) * e.u, { blend: 'add', max: 0.5, tint: 0xfff2c0 });
+      e.press(p.p, 80 * e.u, 0.0012);
+      if (Math.random() < 0.25) e.particle('sparkle', p.p.clone().add(new THREE.Vector3(rand(-0.01, 0.01), rand(-0.01, 0.01), 0.002)), rand(2, 4) * 0.001, { add: true, max: 0.5, tint: 0xfff2c0 });
     },
   });
 
@@ -72,19 +80,19 @@ export function oilProcedure(e: Engine): Procedure {
       e.hooks.loop('rub', false);
     },
     move(p) {
-      const oiled = e.coverage('oil', e.cellsInCircle(p.x, p.y, 40 * e.u)) > 0.3;
-      e.pinch(p.x, p.y, 110 * e.u, 0.14);
-      e.force(p.x, p.y, 120 * e.u, p.dx * 1.1, p.dy * 1.1);
-      const d = Math.hypot(p.dx, p.dy);
+      const oiled = e.amountAt('oil', p.uv) > 0.3;
+      e.force(p.p, 120 * e.u, clampLen(p.delta.clone().multiplyScalar(1.1), 0.006));
+      const d = p.delta.length();
       if (oiled) {
         kneaded += d;
         e.work(d / (55 * e.u));
-        if (Math.random() < 0.08) e.particle('heart', p.x, p.y - 40 * e.u, 26 * e.u, { vy: -120 * e.u, max: 0.9, spin: 0.5 });
+        if (Math.random() < 0.06) e.particle('heart', p.p.clone().addScaledVector(p.n, 0.01), 0.005, { v: p.n.clone().multiplyScalar(0.03).add(new THREE.Vector3(0, 0.02, 0)), max: 0.9, spin: 0.5 });
       }
       if (Math.random() < 0.2) e.hooks.haptic('tick');
     },
     update() {
-      if (e.ptr.down) e.pinch(e.ptr.x, e.ptr.y, 90 * e.u, 0.1);
+      // Thumb pressure: a deep, soft dent under the finger.
+      if (e.ptr.down && e.ptr.hit) e.press(e.ptr.p, 110 * e.u, 0.0028);
     },
     progress: () => clamp01(kneaded / (2600 * e.u)),
   };
@@ -93,8 +101,16 @@ export function oilProcedure(e: Engine): Procedure {
 }
 
 export function washProcedure(e: Engine): Procedure {
-  const region = () => e.maskCells;
-  const dripT = { t: 0 };
+  let dripT = 0;
+  const runDrops = (dt: number) => {
+    dripT += dt;
+    if (dripT < 0.22) return;
+    dripT = 0;
+    const s = e.surfaceAt(e.ptr.p.clone().add(new THREE.Vector3(rand(-0.015, 0.015), rand(-0.01, 0.01), 0)));
+    if (!s) return;
+    // drops running down wet skin
+    e.particle('water', s.p.clone().addScaledVector(s.n, 0.0012), rand(1.4, 2.4) * 0.001, { v: downhill(s.n).multiplyScalar(rand(0.006, 0.014)), max: 2.2, alpha: 0.9 });
+  };
 
   const wet = rubStep(e, {
     title: 'Wet',
@@ -106,17 +122,12 @@ export function washProcedure(e: Engine): Procedure {
     alpha: 0.35,
     target: 0.7,
     loop: 'water',
-    region,
     onUpdate(dt) {
-      if (!e.ptr.down) return;
-      spray(e, e.ptr.x, e.ptr.y);
-      e.stamp('wet', e.ptr.x, e.ptr.y, 80 * e.u, { alpha: 0.15 });
-      dripT.t += dt;
-      if (dripT.t > 0.25) {
-        dripT.t = 0;
-        // drops running down wet skin
-        e.particle('water', e.ptr.x + rand(-80, 80) * e.u, e.ptr.y + rand(0, 60) * e.u, rand(10, 18) * e.u, { vy: rand(30, 70) * e.u, max: 2.5, alpha: 0.9 });
-      }
+      e.toolPose.lift = 0.035;
+      if (!e.ptr.down || !e.ptr.hit) return;
+      spray(e, e.ptr, 0.012);
+      e.stamp('wet', e.ptr.uv, 80 * e.u, { alpha: 0.15 });
+      runDrops(dt);
     },
   });
 
@@ -134,7 +145,11 @@ export function washProcedure(e: Engine): Procedure {
     loop: 'lather',
     onMove(p) {
       if (Math.random() < 0.35)
-        e.particle('bubble', p.x + rand(-50, 50) * e.u, p.y + rand(-50, 50) * e.u, rand(12, 30) * e.u, { vy: rand(-90, -30) * e.u, vx: rand(-30, 30) * e.u, grow: 0.3, max: rand(0.6, 1.4) });
+        e.particle('bubble', p.p.clone().add(new THREE.Vector3(rand(-0.01, 0.01), rand(-0.01, 0.01), 0)).addScaledVector(p.n, 0.003), rand(2, 6) * 0.001, {
+          v: p.n.clone().multiplyScalar(rand(0.005, 0.02)).add(new THREE.Vector3(0, 0.01, 0)),
+          grow: 0.3,
+          max: rand(0.6, 1.4),
+        });
     },
   });
 
@@ -150,11 +165,15 @@ export function washProcedure(e: Engine): Procedure {
     alsoErase: [['oil', 0.12]],
     alsoPaint: [['wet', 0.2, 90]],
     loop: 'water',
-    onUpdate() {
-      if (e.ptr.down) spray(e, e.ptr.x, e.ptr.y);
+    onUpdate(dt) {
+      e.toolPose.lift = 0.035;
+      if (e.ptr.down && e.ptr.hit) {
+        spray(e, e.ptr, 0.012);
+        runDrops(dt);
+      }
     },
     onMove(p) {
-      if (Math.random() < 0.3) e.particle('foam', p.x + rand(-40, 40) * e.u, p.y + rand(20, 60) * e.u, rand(20, 40) * e.u, { vy: rand(80, 160) * e.u, max: 0.9, alpha: 0.9 });
+      if (Math.random() < 0.3) e.particle('foam', p.p.clone().addScaledVector(downhill(p.n), 0.01).addScaledVector(p.n, 0.002), rand(4, 8) * 0.001, { v: downhill(p.n).multiplyScalar(0.03), max: 0.9, alpha: 0.9 });
     },
   });
 
@@ -169,6 +188,9 @@ export function washProcedure(e: Engine): Procedure {
     target: 0.05,
     drag: 0.9,
     loop: 'rub',
+    onMove(p) {
+      e.press(p.p, 120 * e.u, 0.0015);
+    },
   });
 
   return { id: 'wash', steps: [wet, lather, rinse, dry], accuracy: () => 0.5 };
@@ -195,24 +217,23 @@ export function tickleProcedure(e: Engine): Procedure {
       energy = clamp01(energy + gain * dt * 2.2 - dt * 0.7);
       total += gain * dt * 24;
       if (gain) e.work(gain * dt * 14);
-
-      // feather flutter
-      e.cursor.rotation = Math.PI * 0.9 + Math.sin(performance.now() / 60) * 0.12 * (0.3 + energy);
+      // feather flutters and barely touches the skin
+      e.toolPose.spin = Math.sin(e.time * 18) * 0.25 * (0.3 + energy);
+      e.toolPose.tilt = 0.4;
 
       if (energy > 0.15) {
         twitchT += dt;
         if (twitchT > 0.14) {
           twitchT = 0;
-          e.kick(e.ptr.x, e.ptr.y, 200 * e.u, 900 * e.u * energy);
+          e.kick(e.ptr.p, 200 * e.u, 0.09 * energy);
           if (energy > 0.6 && Math.random() < 0.3) e.shake(6 * energy);
         }
-        // toes curl down toward the sole
-        const b = e.maskBox;
-        e.force((b.x0 + b.x1) / 2, b.y0 + (b.y1 - b.y0) * 0.1, (b.x1 - b.x0) * 0.4, 0, 28 * e.u * energy);
+        // toes curl toward the sole
+        e.force(e.L.toes, 0.035, new THREE.Vector3(0, -0.004 * energy, 0.009 * energy));
         giggleT += dt;
         if (giggleT > 0.9 - energy * 0.4) {
           giggleT = 0;
-          e.floatText(e.ptr.x + rand(-120, 120) * e.u, e.ptr.y - rand(60, 160) * e.u, GIGGLES[Math.floor(Math.random() * GIGGLES.length)], 0xffd6f0, 44);
+          e.floatText(e.ptr.p.clone().add(new THREE.Vector3(rand(-0.03, 0.03), rand(0.01, 0.03), 0.01)), GIGGLES[Math.floor(Math.random() * GIGGLES.length)], '#ffd6f0', 22);
           e.hooks.sfx('giggle');
           e.hooks.haptic('light');
         }

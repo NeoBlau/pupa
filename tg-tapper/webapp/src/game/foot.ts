@@ -5,13 +5,18 @@
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { edgeTable, triTable } from 'three/examples/jsm/objects/MarchingCubes.js';
+import { edgeTable as edgeTableT, triTable as triTableT } from 'three/examples/jsm/objects/MarchingCubes.js';
+
+// @types/three declares these as Int32Array[], but at runtime they are flat Int32Arrays.
+const edgeTable = edgeTableT as unknown as Int32Array;
+const triTable = triTableT as unknown as Int32Array;
 import type { ModelDef } from '@shared/game.ts';
 
 export interface FootAsset {
   geometry: THREE.BufferGeometry;
   map: THREE.Texture;
   normalMap: THREE.Texture | null;
+  roughnessMap: THREE.Texture | null;
   /** Nails and other static meshes attached to the foot. */
   extras: THREE.Object3D[];
   length: number;
@@ -167,64 +172,134 @@ function polygonize(f: (x: number, y: number, z: number) => number, min: V3, max
 }
 
 // ---------------------------------------------------------------------------
-// Skin textures (albedo + normal), painted in planar sole UV space
+// 4K skin textures (albedo, normal, roughness), painted in planar sole UV space
 
-const TEX = 1024;
+const TEX = 4096;
 
-function skinTextures(tone: THREE.Color, uvOf: (x: number, y: number) => [number, number]) {
+/** Tileable value-noise tile, used as a pattern at several scales. */
+function noiseTile(size: number, cell: number, seed = Math.random()) {
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = size;
+  const c = cv.getContext('2d')!;
+  const img = c.createImageData(size, size);
+  const n = Math.ceil(size / cell);
+  const grid = Array.from({ length: n * n }, (_, i) => Math.abs(Math.sin((i + 1) * 12.9898 * (seed + 1)) * 43758.5453) % 1);
+  const at = (x: number, y: number) => grid[((y + n) % n) * n + ((x + n) % n)];
+  for (let y = 0; y < size; y++)
+    for (let x = 0; x < size; x++) {
+      const gx = x / cell;
+      const gy = y / cell;
+      const ix = Math.floor(gx);
+      const iy = Math.floor(gy);
+      const fx = gx - ix;
+      const fy = gy - iy;
+      const sx = fx * fx * (3 - 2 * fx);
+      const sy = fy * fy * (3 - 2 * fy);
+      const v = (at(ix, iy) * (1 - sx) + at(ix + 1, iy) * sx) * (1 - sy) + (at(ix, iy + 1) * (1 - sx) + at(ix + 1, iy + 1) * sx) * sy;
+      const o = (y * size + x) * 4;
+      img.data[o] = img.data[o + 1] = img.data[o + 2] = v * 255;
+      img.data[o + 3] = 255;
+    }
+  c.putImageData(img, 0, 0);
+  return cv;
+}
+
+/** Tile of skin pores: small dark pits with a faint raised rim. */
+function poreTile(size: number, count: number) {
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = size;
+  const c = cv.getContext('2d')!;
+  c.fillStyle = '#808080';
+  c.fillRect(0, 0, size, size);
+  for (let i = 0; i < count; i++) {
+    const x = Math.random() * size;
+    const y = Math.random() * size;
+    const r = 0.8 + Math.random() * 1.6;
+    for (const [ox, oy] of [[0, 0], [size, 0], [0, size], [-size, 0], [0, -size]]) {
+      const g = c.createRadialGradient(x + ox, y + oy, 0, x + ox, y + oy, r * 2);
+      g.addColorStop(0, 'rgba(0,0,0,0.55)');
+      g.addColorStop(0.5, 'rgba(0,0,0,0.15)');
+      g.addColorStop(0.75, 'rgba(255,255,255,0.12)');
+      g.addColorStop(1, 'rgba(255,255,255,0)');
+      c.fillStyle = g;
+      c.fillRect(x + ox - r * 2, y + oy - r * 2, r * 4, r * 4);
+    }
+  }
+  return cv;
+}
+
+function overlayPattern(c: CanvasRenderingContext2D, tile: HTMLCanvasElement, scale: number, alpha: number, op: GlobalCompositeOperation) {
+  const pat = c.createPattern(tile, 'repeat')!;
+  pat.setTransform(new DOMMatrix().scale(scale).rotate(Math.random() * 360));
+  c.save();
+  c.globalAlpha = alpha;
+  c.globalCompositeOperation = op;
+  c.fillStyle = pat;
+  c.fillRect(0, 0, TEX, TEX);
+  c.restore();
+}
+
+function skinTextures(tone: THREE.Color, uvOf: (x: number, y: number) => [number, number], renderer: THREE.WebGLRenderer) {
   const cv = document.createElement('canvas');
   cv.width = cv.height = TEX;
   const c = cv.getContext('2d')!;
-  const base = `#${tone.getHexString()}`;
-  c.fillStyle = base;
+  c.fillStyle = `#${tone.getHexString()}`;
   c.fillRect(0, 0, TEX, TEX);
 
-  // Blotchy natural variation
-  for (let i = 0; i < 900; i++) {
-    const x = Math.random() * TEX;
-    const y = Math.random() * TEX;
-    const r = 8 + Math.random() * 40;
-    const g = c.createRadialGradient(x, y, 0, x, y, r);
-    const tint = Math.random() < 0.5 ? '255,170,150' : '120,70,50';
-    g.addColorStop(0, `rgba(${tint},${0.02 + Math.random() * 0.04})`);
-    g.addColorStop(1, `rgba(${tint},0)`);
-    c.fillStyle = g;
-    c.fillRect(x - r, y - r, r * 2, r * 2);
-  }
-  // Pressure areas are pinker: heel, ball, toe pads
-  const pink = (x: number, y: number, rx: number, ry: number, a: number) => {
-    const [u, v] = uvOf(x, y);
-    c.save();
-    c.translate(u * TEX, (1 - v) * TEX);
-    c.scale(rx, ry);
-    const g = c.createRadialGradient(0, 0, 0, 0, 0, 1);
-    g.addColorStop(0, `rgba(240,110,110,${a})`);
-    g.addColorStop(1, 'rgba(240,110,110,0)');
-    c.fillStyle = g;
-    c.beginPath();
-    c.arc(0, 0, 1, 0, Math.PI * 2);
-    c.fill();
-    c.restore();
-  };
-  const px = TEX / 0.26;
-  pink(0, 0.03, 0.035 * px, 0.04 * px, 0.32);
-  pink(0, 0.17, 0.05 * px, 0.028 * px, 0.28);
-  for (const t of TOES) pink(t.b[0], t.b[1] - t.r * 0.5, t.r * 1.2 * px, t.r * 1.2 * px, 0.35);
+  // Natural mottling at three scales, plus warm/cool variation.
+  overlayPattern(c, noiseTile(512, 64), 4, 0.1, 'multiply');
+  overlayPattern(c, noiseTile(512, 24), 2, 0.07, 'soft-light');
+  overlayPattern(c, noiseTile(512, 8), 1, 0.05, 'soft-light');
 
-  // Height map for the normal map: pores + creases
+  const px = TEX / 0.26;
+  const blob = (ctx: CanvasRenderingContext2D, x: number, y: number, rx: number, ry: number, rgba: string) => {
+    const [u, v] = uvOf(x, y);
+    ctx.save();
+    ctx.translate(u * TEX, (1 - v) * TEX);
+    ctx.scale(rx * px, ry * px);
+    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+    g.addColorStop(0, rgba);
+    g.addColorStop(1, rgba.replace(/[\d.]+\)$/, '0)'));
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(0, 0, 1, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  };
+  // Pressure areas are pinker/redder: heel, ball, toe pads, outer edge.
+  blob(c, 0, 0.032, 0.036, 0.042, 'rgba(232,105,100,0.34)');
+  blob(c, 0, 0.17, 0.052, 0.03, 'rgba(232,105,100,0.3)');
+  blob(c, 0.035, 0.1, 0.012, 0.06, 'rgba(225,120,105,0.18)');
+  for (const t of TOES) blob(c, t.b[0], t.b[1] - t.r * 0.5, t.r * 1.25, t.r * 1.25, 'rgba(236,108,108,0.38)');
+  // Arch is paler and slightly yellower; callus-like heel rim.
+  blob(c, -0.03, 0.105, 0.022, 0.05, 'rgba(250,228,205,0.35)');
+  blob(c, 0, 0.012, 0.03, 0.014, 'rgba(240,215,175,0.3)');
+
+  // Height map: pores, fine lines, creases.
   const hc = document.createElement('canvas');
   hc.width = hc.height = TEX;
   const h = hc.getContext('2d')!;
   h.fillStyle = '#808080';
   h.fillRect(0, 0, TEX, TEX);
-  for (let i = 0; i < 60000; i++) {
-    h.fillStyle = Math.random() < 0.5 ? 'rgba(0,0,0,0.25)' : 'rgba(255,255,255,0.12)';
-    h.fillRect(Math.random() * TEX, Math.random() * TEX, 1.5, 1.5);
+  overlayPattern(h, poreTile(512, 900), 1, 1, 'source-over');
+  overlayPattern(h, noiseTile(512, 6), 1, 0.25, 'overlay');
+  overlayPattern(h, noiseTile(512, 40), 2, 0.2, 'overlay');
+
+  // Creases are drawn sharp on separate layers and blurred once at the end
+  // (a per-stroke canvas blur at 4K would take minutes).
+  const ch = document.createElement('canvas');
+  ch.width = ch.height = TEX;
+  const chx = ch.getContext('2d')!;
+  const cc = document.createElement('canvas');
+  cc.width = cc.height = TEX;
+  const ccx = cc.getContext('2d')!;
+  for (const ctx of [chx, ccx]) {
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
   }
-  // sole creases (arch & ball), drawn into both height and albedo
-  const crease = (pts: [number, number][], w: number, a: number) => {
-    for (const ctx of [h, c]) {
-      ctx.strokeStyle = ctx === h ? `rgba(0,0,0,${a})` : `rgba(110,55,40,${a * 0.25})`;
+  const crease = (pts: [number, number][], w: number, depth: number, tint: number) => {
+    for (const ctx of [chx, ccx]) {
+      ctx.strokeStyle = ctx === chx ? `rgba(0,0,0,${depth})` : `rgba(120,55,45,${tint})`;
       ctx.lineWidth = w;
       ctx.beginPath();
       pts.forEach(([x, y], i) => {
@@ -235,74 +310,103 @@ function skinTextures(tone: THREE.Color, uvOf: (x: number, y: number) => [number
       ctx.stroke();
     }
   };
-  for (let i = 0; i < 26; i++) {
-    const x = -0.03 + Math.random() * 0.06;
-    const y = 0.07 + Math.random() * 0.08;
-    crease([
-      [x, y],
-      [x + 0.01 * (Math.random() - 0.5), y + 0.012 + Math.random() * 0.015],
-    ], 1.5 + Math.random() * 2, 0.35);
+  const wobbly = (x0: number, y0: number, x1: number, y1: number, n = 8, amp = 0.0012): [number, number][] =>
+    Array.from({ length: n + 1 }, (_, i) => {
+      const t = i / n;
+      return [x0 + (x1 - x0) * t + (Math.random() - 0.5) * amp, y0 + (y1 - y0) * t + (Math.random() - 0.5) * amp];
+    });
+  // Fine skin lines across the whole sole (dermatoglyphic texture).
+  for (let i = 0; i < 700; i++) {
+    const x = -0.05 + Math.random() * 0.1;
+    const y = 0.01 + Math.random() * 0.2;
+    const a = Math.random() * Math.PI;
+    const l = 0.002 + Math.random() * 0.006;
+    crease(wobbly(x, y, x + Math.cos(a) * l, y + Math.sin(a) * l, 3, 0.0004), 2 + Math.random() * 2, 0.18, 0.03);
   }
-  crease(
-    [
-      [-0.045, 0.152],
-      [-0.01, 0.148],
-      [0.03, 0.15],
-      [0.05, 0.158],
-    ],
-    3,
-    0.45,
-  );
-  for (const t of TOES)
-    crease(
-      [
-        [t.a[0] - t.r, t.a[1] + 0.004],
-        [t.a[0] + t.r, t.a[1] + 0.004],
-      ],
-      2.5,
-      0.5,
-    );
+  // Long arch creases (the classic sole wrinkles when the foot is relaxed).
+  for (let i = 0; i < 34; i++) {
+    const x = -0.038 + Math.random() * 0.065;
+    const y = 0.07 + Math.random() * 0.075;
+    crease(wobbly(x, y, x + (Math.random() - 0.5) * 0.02, y + 0.015 + Math.random() * 0.03), 5 + Math.random() * 6, 0.45, 0.12);
+  }
+  // Transverse crease below the ball and at each toe base.
+  crease(wobbly(-0.048, 0.151, 0.052, 0.156, 14, 0.0015), 11, 0.6, 0.18);
+  crease(wobbly(-0.044, 0.147, 0.04, 0.149, 14, 0.0015), 6, 0.35, 0.1);
+  for (const t of TOES) {
+    crease(wobbly(t.a[0] - t.r * 1.1, t.a[1] + 0.002, t.a[0] + t.r * 1.1, t.a[1] + 0.003, 6, 0.0006), 9, 0.65, 0.2);
+    crease(wobbly(t.a[0] - t.r * 0.9, t.a[1] + 0.0065, t.a[0] + t.r * 0.9, t.a[1] + 0.007, 6, 0.0005), 5, 0.4, 0.12);
+    // fingerprint-like whorls on toe pads
+    for (let k = 0; k < 6; k++) {
+      const rr = t.r * (0.25 + k * 0.12);
+      const cx = t.b[0];
+      const cy = t.b[1] - t.r * 0.45;
+      crease(Array.from({ length: 13 }, (_, i) => { const a = Math.PI * (0.15 + (i / 12) * 0.7); return [cx + Math.cos(a) * rr, cy + Math.sin(a) * rr * 0.9] as [number, number]; }), 2.5, 0.25, 0.04);
+    }
+  }
+  // Heel: concentric ridges.
+  for (let k = 0; k < 9; k++) {
+    const rr = 0.006 + k * 0.0035;
+    crease(Array.from({ length: 17 }, (_, i) => { const a = Math.PI * (1.15 + (i / 16) * 0.7); return [Math.cos(a) * rr * 1.1, 0.034 + Math.sin(a) * rr] as [number, number]; }), 3, 0.22, 0.04);
+  }
+
+  h.filter = 'blur(2px)';
+  h.drawImage(ch, 0, 0);
+  h.filter = 'none';
+  c.filter = 'blur(3px)';
+  c.drawImage(cc, 0, 0);
+  c.filter = 'none';
 
   const map = new THREE.CanvasTexture(cv);
   map.colorSpace = THREE.SRGBColorSpace;
-  map.anisotropy = 4;
-  return { map, normalMap: heightToNormal(hc, 2.5) };
+  map.anisotropy = renderer.capabilities.getMaxAnisotropy();
+
+  // Roughness: creases & pores slightly rougher; pads a bit smoother.
+  const rc = document.createElement('canvas');
+  rc.width = rc.height = 2048;
+  const r = rc.getContext('2d')!;
+  r.fillStyle = 'rgb(150,150,150)';
+  r.fillRect(0, 0, 2048, 2048);
+  r.globalAlpha = 0.35;
+  r.drawImage(hc, 0, 0, 2048, 2048);
+  const roughnessMap = new THREE.CanvasTexture(rc);
+
+  return { map, normalMap: gpuNormalMap(renderer, hc, 3.2), roughnessMap };
 }
 
-function heightToNormal(src: HTMLCanvasElement, strength: number) {
-  const w = src.width;
-  const hgt = src.getContext('2d')!.getImageData(0, 0, w, w).data;
-  const out = new ImageData(w, w);
-  const H = (x: number, y: number) => hgt[(((y + w) % w) * w + ((x + w) % w)) * 4] / 255;
-  for (let y = 0; y < w; y++)
-    for (let x = 0; x < w; x++) {
-      const dx = (H(x + 1, y) - H(x - 1, y)) * strength;
-      const dy = (H(x, y + 1) - H(x, y - 1)) * strength;
-      const l = Math.hypot(dx, dy, 1);
-      const o = (y * w + x) * 4;
-      out.data[o] = ((-dx / l) * 0.5 + 0.5) * 255;
-      out.data[o + 1] = ((dy / l) * 0.5 + 0.5) * 255;
-      out.data[o + 2] = (1 / l) * 0.5 * 255 + 127;
-      out.data[o + 3] = 255;
-    }
-  const cv = document.createElement('canvas');
-  cv.width = cv.height = w;
-  cv.getContext('2d')!.putImageData(out, 0, 0);
-  const t = new THREE.CanvasTexture(cv);
-  t.anisotropy = 4;
-  return t;
+/** Height map → tangent-space normal map, computed on the GPU at full resolution. */
+function gpuNormalMap(renderer: THREE.WebGLRenderer, height: HTMLCanvasElement, strength: number) {
+  const src = new THREE.CanvasTexture(height);
+  src.wrapS = src.wrapT = THREE.RepeatWrapping;
+  const size = height.width;
+  const rt = new THREE.WebGLRenderTarget(size, size, { generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter, depthBuffer: false });
+  const mat = new THREE.ShaderMaterial({
+    uniforms: { h: { value: src }, texel: { value: 1 / size }, strength: { value: strength } },
+    vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
+    fragmentShader: `
+      uniform sampler2D h; uniform float texel; uniform float strength; varying vec2 vUv;
+      float H(vec2 o){ return texture2D(h, vUv + o * texel).r; }
+      void main(){
+        float dx = (H(vec2(1.,0.)) - H(vec2(-1.,0.))) * 0.5 + (H(vec2(2.,0.)) - H(vec2(-2.,0.))) * 0.25;
+        float dy = (H(vec2(0.,1.)) - H(vec2(0.,-1.))) * 0.5 + (H(vec2(0.,2.)) - H(vec2(0.,-2.))) * 0.25;
+        vec3 n = normalize(vec3(-dx * strength, -dy * strength, 1.0));
+        gl_FragColor = vec4(n * 0.5 + 0.5, 1.0);
+      }`,
+  });
+  const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat);
+  const scene = new THREE.Scene();
+  scene.add(quad);
+  const prev = renderer.getRenderTarget();
+  renderer.setRenderTarget(rt);
+  renderer.render(scene, new THREE.Camera());
+  renderer.setRenderTarget(prev);
+  src.dispose();
+  mat.dispose();
+  quad.geometry.dispose();
+  rt.texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  return rt.texture;
 }
 
 // ---------------------------------------------------------------------------
-
-const TONES: Record<string, string> = {
-  anna: '#f0c3a6',
-  kate: '#f5cfb6',
-  kim: '#eec7a1',
-  tiffany: '#8e5a3b',
-  mia: '#e5b691',
-  lola: '#c88e6a',
-};
 
 const LANDMARKS = {
   heel: new THREE.Vector3(0, 0.035, 0),
@@ -312,8 +416,8 @@ const LANDMARKS = {
   center: new THREE.Vector3(0, 0.12, -0.005),
 };
 
-export function proceduralFoot(def: ModelDef): FootAsset {
-  const { pos, index } = polygonize(footSdf, [-0.07, -0.015, -0.17], [0.075, 0.265, 0.01], 0.0022);
+export function proceduralFoot(def: ModelDef, renderer: THREE.WebGLRenderer): FootAsset {
+  const { pos, index } = polygonize(footSdf, [-0.07, -0.015, -0.17], [0.075, 0.265, 0.01], 0.0017);
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   g.setIndex(index);
@@ -355,11 +459,18 @@ export function proceduralFoot(def: ModelDef): FootAsset {
   g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
   g.setAttribute('paintMask', new THREE.BufferAttribute(mask, 1));
 
-  const tone = new THREE.Color(TONES[def.id] ?? '#e9bfa0');
-  const { map, normalMap } = skinTextures(tone, uvOf);
+  const tone = new THREE.Color(def.skin);
+  const { map, normalMap, roughnessMap } = skinTextures(tone, uvOf, renderer);
 
   // Toenails on the top side of each toe.
-  const nailMat = new THREE.MeshPhysicalMaterial({ color: tone.clone().lerp(new THREE.Color('#ffd6d0'), 0.55), roughness: 0.25, clearcoat: 1, clearcoatRoughness: 0.1 });
+  const nailMat = new THREE.MeshPhysicalMaterial({
+    color: tone.clone().lerp(new THREE.Color('#ffd9d2'), 0.6),
+    roughness: 0.3,
+    clearcoat: 1,
+    clearcoatRoughness: 0.08,
+    sheen: 0.3,
+    sheenColor: new THREE.Color('#ffffff'),
+  });
   const extras: THREE.Object3D[] = TOES.map((t) => {
     const m = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 12), nailMat);
     m.scale.set(t.r * 0.75, t.r * 0.85, t.r * 0.22);
@@ -367,7 +478,7 @@ export function proceduralFoot(def: ModelDef): FootAsset {
     return m;
   });
 
-  return { geometry: g, map, normalMap, extras, length: 0.25, uvPerMeter: 1 / S, landmarks: LANDMARKS };
+  return { geometry: g, map, normalMap, roughnessMap, extras, length: 0.25, uvPerMeter: 1 / S, landmarks: LANDMARKS };
 }
 
 /**
@@ -420,6 +531,7 @@ export async function loadScan(url: string, rotation: [number, number, number] =
     geometry: g,
     map: srcMat.map ?? new THREE.Texture(),
     normalMap: srcMat.normalMap ?? null,
+    roughnessMap: srcMat.roughnessMap ?? null,
     extras: [],
     length: 0.25,
     uvPerMeter: Math.sqrt(uvA / Math.max(wA, 1e-9)),

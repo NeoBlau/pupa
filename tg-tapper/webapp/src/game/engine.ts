@@ -1,47 +1,35 @@
-import {
-  Application,
-  Assets,
-  Container,
-  Mesh,
-  MeshPlane,
-  RenderTexture,
-  Sprite,
-  Text,
-  type FederatedPointerEvent,
-  type Texture,
-} from 'pixi.js';
+import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader.js';
+import { DecalGeometry } from 'three/examples/jsm/geometries/DecalGeometry.js';
+import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree, type MeshBVH } from 'three-mesh-bvh';
 import type { ModelDef, ToolId } from '@shared/game.ts';
 import { createTextures, type TexName, type Textures } from './textures.ts';
+import { loadScan, proceduralFoot, type FootAsset } from './foot.ts';
+import { Paint, patchSkinMaterial, type LayerId, type StampOpts } from './paint.ts';
+import { loadMaterials, type Materials } from './materials.ts';
+import { createTool, type ToolName } from './tools3d.ts';
+import { roundedSlab } from './geom.ts';
 
-// ---------------------------------------------------------------------------
-// Types shared with procedures
+THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
+THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
+THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
-export type LayerId = 'redness' | 'ink' | 'shade' | 'stencil' | 'smudge' | 'fluid' | 'oil' | 'gloss' | 'wet' | 'foam' | 'frost';
-
-/** Bottom to top. Stamps are white; tint/alpha/blend of the whole layer give the look. */
-const LAYER_DEFS: { id: LayerId; tint: number; alpha: number; blend: 'normal' | 'add' }[] = [
-  { id: 'redness', tint: 0xff2a2a, alpha: 0.32, blend: 'normal' },
-  { id: 'ink', tint: 0xffffff, alpha: 0.93, blend: 'normal' },
-  { id: 'shade', tint: 0xffffff, alpha: 0.85, blend: 'normal' },
-  { id: 'stencil', tint: 0xffffff, alpha: 0.9, blend: 'normal' },
-  { id: 'smudge', tint: 0xffffff, alpha: 0.75, blend: 'normal' },
-  { id: 'fluid', tint: 0xffffff, alpha: 1, blend: 'normal' },
-  { id: 'frost', tint: 0xffffff, alpha: 0.85, blend: 'normal' },
-  { id: 'oil', tint: 0xffe7b0, alpha: 0.38, blend: 'add' },
-  { id: 'gloss', tint: 0xfff6e6, alpha: 0.42, blend: 'add' },
-  { id: 'wet', tint: 0xd8ecff, alpha: 0.2, blend: 'add' },
-  { id: 'foam', tint: 0xffffff, alpha: 1, blend: 'normal' },
-];
+export type { LayerId };
+export type V3 = THREE.Vector3;
 
 export interface Ptr {
-  /** Tool tip in texture space. */
-  x: number;
-  y: number;
-  dx: number;
-  dy: number;
-  /** Texture px per second. */
+  /** Tool tip on the skin (world). */
+  p: THREE.Vector3;
+  n: THREE.Vector3;
+  uv: THREE.Vector2;
+  /** Movement since the last event (world). */
+  delta: THREE.Vector3;
+  /** metres per second */
   speed: number;
   down: boolean;
+  /** Is the tool currently over the foot? */
+  hit: boolean;
 }
 
 export interface SubTool {
@@ -53,7 +41,7 @@ export interface SubTool {
 export interface Step {
   title: string;
   hint: string;
-  cursor?: TexName | null;
+  cursor?: ToolName | null;
   tools?: SubTool[];
   tool?: string;
   enter?(): void;
@@ -63,14 +51,12 @@ export interface Step {
   move?(p: Ptr): void;
   up?(p: Ptr): void;
   select?(id: string): void;
-  /** 0..1, step completes at 1. */
   progress(): number;
 }
 
 export interface Procedure {
   id: ToolId;
   steps: Step[];
-  /** 0..1 quality of the whole procedure (timing, precision, cleanliness). */
   accuracy(): number;
   dispose?(): void;
 }
@@ -91,74 +77,15 @@ export interface EngineHooks {
   onWork(units: number): void;
   onFinish(tool: ToolId, accuracy: number): void;
   onStep(view: StepView | null): void;
+  onLoad?(progress: number): void;
   sfx(name: string): void;
   loop(name: string, on: boolean): void;
   haptic(kind: 'light' | 'medium' | 'heavy' | 'success' | 'error' | 'tick'): void;
 }
 
-// Cursor placement for each tool texture: anchor (tool tip), rotation, height in px.
-const CURSORS: Partial<Record<TexName, { anchor: [number, number]; rot: number; h: number }>> = {
-  bottle: { anchor: [0.5, 0], rot: Math.PI * 0.85, h: 120 },
-  shampoo: { anchor: [0.5, 0], rot: Math.PI * 0.85, h: 120 },
-  peroxide: { anchor: [0.5, 0], rot: Math.PI * 0.85, h: 120 },
-  saline: { anchor: [0.5, 0], rot: Math.PI * 0.85, h: 120 },
-  tube: { anchor: [0.5, 0], rot: Math.PI * 0.8, h: 110 },
-  shower: { anchor: [0.4, 0.27], rot: 0, h: 120 },
-  machine: { anchor: [0.5, 1], rot: 0.35, h: 140 },
-  laser: { anchor: [0.5, 0.97], rot: 0.3, h: 140 },
-  needle: { anchor: [0.5, 1], rot: 0.2, h: 120 },
-  swab: { anchor: [0.5, 0.05], rot: Math.PI * 0.85, h: 120 },
-  feather: { anchor: [0.5, 0.03], rot: Math.PI * 0.9, h: 150 },
-  cotton: { anchor: [0.5, 0.5], rot: 0, h: 70 },
-  gauze: { anchor: [0.5, 0.5], rot: 0, h: 70 },
-  towel: { anchor: [0.5, 0.5], rot: 0, h: 80 },
-  ice: { anchor: [0.5, 0.5], rot: 0, h: 80 },
-  paper: { anchor: [0.5, 0.5], rot: 0, h: 80 },
-};
-
-const GRID_W = 50;
-const RT_RES = 0.5;
-
-class PaintLayer {
-  rt: RenderTexture;
-  mesh: Mesh;
-  batch = new Container();
-  pool: Sprite[] = [];
-  used = 0;
-  grid: Float32Array;
-
-  constructor(
-    public id: LayerId,
-    geometry: MeshPlane['geometry'],
-    texW: number,
-    texH: number,
-    gridLen: number,
-  ) {
-    this.rt = RenderTexture.create({ width: Math.ceil(texW * RT_RES), height: Math.ceil(texH * RT_RES) });
-    this.mesh = new Mesh({ geometry, texture: this.rt });
-    this.batch.scale.set(RT_RES);
-    this.grid = new Float32Array(gridLen);
-  }
-
-  next(tex: Texture) {
-    let s = this.pool[this.used];
-    if (!s) {
-      s = new Sprite(tex);
-      s.anchor.set(0.5);
-      this.pool.push(s);
-      this.batch.addChild(s);
-    }
-    s.texture = tex;
-    s.visible = true;
-    this.used++;
-    return s;
-  }
-}
-
 interface Particle {
-  s: Sprite | Text;
-  vx: number;
-  vy: number;
+  s: THREE.Sprite;
+  v: THREE.Vector3;
   g: number;
   life: number;
   max: number;
@@ -169,9 +96,9 @@ interface Particle {
 }
 
 interface Attached {
-  s: Sprite | Container;
-  x: number;
-  y: number;
+  o: THREE.Object3D;
+  p: THREE.Vector3;
+  vi: number;
 }
 
 interface Tween {
@@ -181,58 +108,62 @@ interface Tween {
   done?: () => void;
 }
 
+interface FloatText {
+  el: HTMLDivElement;
+  p: THREE.Vector3;
+  life: number;
+}
+
 export const ease = {
   out: (t: number) => 1 - (1 - t) ** 3,
   inOut: (t: number) => (t < 0.5 ? 4 * t ** 3 : 1 - (-2 * t + 2) ** 3 / 2),
   back: (t: number) => 1 + 2.7 * (t - 1) ** 3 + 1.7 * (t - 1) ** 2,
 };
 
+const tmpV = new THREE.Vector3();
+const tmpV2 = new THREE.Vector3();
+const UP = new THREE.Vector3(0, 1, 0);
+
 // ---------------------------------------------------------------------------
 
 export class Engine {
-  app = new Application();
+  renderer!: THREE.WebGLRenderer;
+  scene = new THREE.Scene();
+  camera = new THREE.PerspectiveCamera(32, 1, 0.01, 10);
+  controls!: OrbitControls;
+  root = new THREE.Group();
+  footGroup = new THREE.Group();
   T!: Textures;
+  M!: Materials;
   hooks: EngineHooks;
 
-  world = new Container();
-  stageC = new Container();
-  skin!: MeshPlane;
-  overlay = new Container();
-  attachedC = new Container();
-  fx = new Container();
-  screenFx = new Container();
-  cursor = new Sprite();
-  maskMesh: Mesh | null = null;
+  foot!: THREE.Mesh<THREE.BufferGeometry, THREE.MeshPhysicalMaterial>;
+  private rayMesh!: THREE.Mesh;
+  private bvh!: MeshBVH;
+  paint!: Paint;
+  asset!: FootAsset;
 
-  texW = 1000;
-  texH = 1600;
-  /** One "unit" = 1/1000 of texture width; all sizes in procedures use it. */
-  u = 1;
+  /** 1 "u" = 1/1160 of the foot length (same scale the procedures were tuned with). */
+  u = 0.25 / 1160;
+  L!: FootAsset['landmarks'];
 
-  layers = {} as Record<LayerId, PaintLayer>;
-  gridW = GRID_W;
-  gridH = 80;
-  cell = 20;
-  maskGrid = new Uint8Array(0);
-  maskCells: number[] = [];
-  maskCenter = { x: 500, y: 800 };
-  maskBox = { x0: 0, y0: 0, x1: 1000, y1: 1600 };
-
-  // soft-body skin
-  private vx = 28;
-  private vy = 44;
+  // soft body
   private base = new Float32Array(0);
+  private baseN = new Float32Array(0);
   private off = new Float32Array(0);
   private vel = new Float32Array(0);
   private target = new Float32Array(0);
-  private forces: { x: number; y: number; r: number; dx: number; dy: number; pinch: number }[] = [];
+  private moving = false;
+  private forces: { p: THREE.Vector3; r: number; d: THREE.Vector3; push: number }[] = [];
+  private hash = new Map<number, number[]>();
 
   private particles: Particle[] = [];
   private attached: Attached[] = [];
   private tweens: Tween[] = [];
+  private texts: FloatText[] = [];
+  private spriteTex = new Map<string, THREE.Texture>();
   private shakeAmt = 0;
-  private time = 0;
-  private dirty = new Set<PaintLayer>();
+  time = 0;
 
   procedure: Procedure | null = null;
   stepIndex = 0;
@@ -240,173 +171,306 @@ export class Engine {
   private finished = false;
   private lastView = '';
 
-  ptr: Ptr = { x: 0, y: 0, dx: 0, dy: 0, speed: 0, down: false };
+  ptr: Ptr = { p: new THREE.Vector3(), n: new THREE.Vector3(0, 0, 1), uv: new THREE.Vector2(), delta: new THREE.Vector3(), speed: 0, down: false, hit: false };
   private tipOffset = 0;
-  private pointerInside = false;
+  private lastMoveT = 0;
+  private pointers = new Set<number>();
+  private pointerType = 'mouse';
+  private raycaster = new THREE.Raycaster();
+
+  tool: THREE.Object3D | null = null;
+  private toolName: ToolName | null = null;
+  private toolCache = new Map<ToolName, THREE.Object3D>();
+  /** Extra per-frame tool pose tweaks set by steps (vibration, tilt, squeeze). */
+  toolPose = { jitter: 0, tilt: 0, lift: 0, spin: 0 };
 
   private unitAcc = 0;
   private unitTokens = 18;
-
-  model: ModelDef | null = null;
-  ready = false;
-  /** Procedures expose key positions here for automated tests (?debug). */
-  debug: Record<string, unknown> = {};
+  private overlay!: HTMLElement;
+  private host!: HTMLElement;
   private resizeObs?: ResizeObserver;
+  private raf = 0;
+  private running = true;
+  private clock = new THREE.Clock();
+  ready = false;
+  model: ModelDef | null = null;
+  debug: Record<string, unknown> = {};
 
   constructor(hooks: EngineHooks) {
     this.hooks = hooks;
   }
 
-  async init(el: HTMLElement) {
-    await this.app.init({
-      resizeTo: el,
-      backgroundAlpha: 0,
-      antialias: true,
-      resolution: Math.min(window.devicePixelRatio || 1, 2),
-      autoDensity: true,
-    });
-    el.appendChild(this.app.canvas);
+  // -------------------------------------------------------------------------
+  // Setup
+
+  async init(host: HTMLElement, overlay: HTMLElement) {
+    this.host = host;
+    this.overlay = overlay;
+    const r = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    r.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    r.toneMapping = THREE.ACESFilmicToneMapping;
+    r.toneMappingExposure = 1.05;
+    r.outputColorSpace = THREE.SRGBColorSpace;
+    r.shadowMap.enabled = true;
+    r.shadowMap.type = THREE.PCFSoftShadowMap;
+    host.appendChild(r.domElement);
+    r.domElement.style.touchAction = 'none';
+    this.renderer = r;
     this.T = createTextures();
-    this.app.stage.addChild(this.world, this.screenFx, this.cursor);
-    this.world.addChild(this.stageC);
-    this.cursor.visible = false;
 
-    const st = this.app.stage;
-    st.eventMode = 'static';
-    st.hitArea = this.app.screen;
-    st.on('pointerdown', (e) => this.onDown(e));
-    st.on('pointermove', (e) => this.onMove(e));
-    st.on('pointerup', (e) => this.onUp(e));
-    st.on('pointerupoutside', (e) => this.onUp(e));
-    st.on('pointerleave', () => {
-      this.pointerInside = false;
+    // Studio lighting: HDRI for reflections + key/rim lights for shape.
+    const pmrem = new THREE.PMREMGenerator(r);
+    const hdr = await new RGBELoader().loadAsync('env/studio.hdr');
+    this.scene.environment = pmrem.fromEquirectangular(hdr).texture;
+    this.scene.environmentIntensity = 0.55;
+    hdr.dispose();
+    pmrem.dispose();
+    this.hooks.onLoad?.(0.3);
+
+    this.M = await loadMaterials(r, (k) => this.hooks.onLoad?.(0.3 + k * 0.5));
+
+    this.scene.background = new THREE.Color(0x0c0812);
+    this.scene.fog = new THREE.Fog(0x0c0812, 0.6, 1.4);
+    const key = new THREE.DirectionalLight(0xfff1e2, 2.4);
+    key.position.set(0.25, 0.45, 0.55);
+    key.target.position.set(0, 0.12, 0);
+    key.castShadow = true;
+    key.shadow.mapSize.set(2048, 2048);
+    key.shadow.camera.left = key.shadow.camera.bottom = -0.25;
+    key.shadow.camera.right = key.shadow.camera.top = 0.25;
+    key.shadow.camera.near = 0.1;
+    key.shadow.camera.far = 1.5;
+    key.shadow.bias = -0.0004;
+    key.shadow.normalBias = 0.002;
+    key.shadow.radius = 6;
+    const rim = new THREE.DirectionalLight(0xff7ab8, 1.6);
+    rim.position.set(-0.45, 0.35, -0.3);
+    const fill = new THREE.HemisphereLight(0xcab8ff, 0x1a0e14, 0.35);
+    this.scene.add(key, key.target, rim, fill, this.root);
+
+    // Velvet couch the leg rests on + a towel under the heel + tool tray.
+    const couch = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 2.4), this.M.velvet);
+    couch.position.set(0, 0.1, -0.17);
+    couch.receiveShadow = true;
+    const towel = new THREE.Mesh(roundedSlab(0.34, 0.2, 0.012, 0.006), this.M.terry);
+    towel.position.set(0.01, -0.035, -0.12);
+    towel.rotation.x = -Math.PI / 2 + 0.25;
+    towel.receiveShadow = true;
+    towel.castShadow = true;
+    const tray = new THREE.Mesh(roundedSlab(0.16, 0.38, 0.01, 0.006), this.M.marble);
+    tray.position.set(0.19, 0.12, -0.16);
+    tray.rotation.x = 0;
+    tray.receiveShadow = true;
+    this.root.add(couch, towel, tray, this.footGroup);
+
+    this.camera.position.set(0, 0.12, 0.48);
+    this.controls = new OrbitControls(this.camera, r.domElement);
+    this.controls.target.set(0, 0.12, -0.02);
+    this.controls.enableDamping = true;
+    this.controls.enablePan = false;
+    this.controls.minDistance = 0.22;
+    this.controls.maxDistance = 0.75;
+    this.controls.minAzimuthAngle = -1.1;
+    this.controls.maxAzimuthAngle = 1.1;
+    this.controls.minPolarAngle = 0.5;
+    this.controls.maxPolarAngle = 2.2;
+    // One finger / left mouse = the tool. Two fingers / right mouse = camera.
+    this.controls.mouseButtons = { LEFT: -1 as unknown as THREE.MOUSE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE };
+    this.controls.touches = { ONE: -1 as unknown as THREE.TOUCH, TWO: THREE.TOUCH.DOLLY_ROTATE };
+
+    const el = r.domElement;
+    el.addEventListener('pointerdown', (e) => this.onDown(e));
+    el.addEventListener('pointermove', (e) => this.onMove(e));
+    el.addEventListener('pointerup', (e) => this.onUp(e));
+    el.addEventListener('pointercancel', (e) => this.onUp(e));
+    el.addEventListener('pointerleave', () => {
+      if (!this.ptr.down) this.ptr.hit = false;
     });
+    el.addEventListener('contextmenu', (e) => e.preventDefault());
 
-    this.app.ticker.add((t) => this.update(Math.min(t.deltaMS / 1000, 0.05)));
-    this.resizeObs = new ResizeObserver(() => this.layout());
-    this.resizeObs.observe(el);
+    this.resizeObs = new ResizeObserver(() => this.resize());
+    this.resizeObs.observe(host);
+    this.resize();
     this.ready = true;
+    this.loop();
   }
 
+  resetCamera() {
+    const from = this.camera.position.clone();
+    const to = new THREE.Vector3(0, 0.12, 0.48);
+    this.tween(0.5, (k) => this.camera.position.lerpVectors(from, to, ease.inOut(k)));
+  }
+
+  setRunning(on: boolean) {
+    this.running = on;
+    if (on && !this.raf) {
+      this.clock.getDelta();
+      this.loop();
+    }
+  }
+
+  private loop = () => {
+    this.raf = 0;
+    if (!this.running) return;
+    this.raf = requestAnimationFrame(this.loop);
+    this.update(Math.min(this.clock.getDelta(), 0.05));
+  };
+
   destroy() {
+    cancelAnimationFrame(this.raf);
+    this.running = false;
     this.resizeObs?.disconnect();
-    this.app.destroy(true, { children: true, texture: false });
+    this.renderer.dispose();
+    this.renderer.domElement.remove();
+  }
+
+  private resize() {
+    const w = this.host.clientWidth || 1;
+    const h = this.host.clientHeight || 1;
+    this.renderer.setSize(w, h);
+    this.camera.aspect = w / h;
+    // Keep the whole foot in frame on narrow phones.
+    this.camera.fov = w / h < 0.7 ? 38 : 30;
+    this.camera.updateProjectionMatrix();
   }
 
   // -------------------------------------------------------------------------
-  // Model loading
+  // Foot
 
   async loadModel(def: ModelDef) {
     this.model = def;
     this.setProcedure(null);
-    this.stageC.removeChildren().forEach((c) => c.destroy({ children: true }));
-    for (const l of Object.values(this.layers)) l.rt.destroy(true);
-    this.particles = [];
+    for (const a of this.attached) a.o.removeFromParent();
     this.attached = [];
+    for (const p of this.particles) p.s.removeFromParent();
+    this.particles = [];
     this.tweens = [];
+    this.footGroup.clear();
+    this.paint?.dispose();
+    this.foot?.geometry.dispose();
 
-    const isVideo = /\.(mp4|webm)$/i.test(def.room);
-    const tex: Texture = await Assets.load(isVideo ? { src: def.room, data: { loop: true, muted: true, autoPlay: true, playsinline: true } } : def.room);
-    this.texW = tex.width;
-    this.texH = tex.height;
-    this.u = this.texW / 1000;
+    let asset: FootAsset;
+    if (def.scan) {
+      try {
+        asset = await loadScan(def.scan, def.scanRotation);
+      } catch (e) {
+        console.warn('Scan failed, using procedural foot', e);
+        asset = proceduralFoot(def, this.renderer);
+      }
+    } else asset = proceduralFoot(def, this.renderer);
+    this.asset = asset;
+    this.u = asset.length / 1160;
+    this.L = asset.landmarks;
 
-    this.vx = 28;
-    this.vy = Math.max(12, Math.min(60, Math.round((28 * this.texH) / this.texW)));
-    this.skin = new MeshPlane({ texture: tex, verticesX: this.vx, verticesY: this.vy });
-    this.skin.autoResize = false;
-    const pos = this.skin.geometry.positions;
+    const g = asset.geometry;
+    this.paint = new Paint(this.renderer, this.T, g, asset.uvPerMeter);
+    const mat = new THREE.MeshPhysicalMaterial({
+      map: asset.map,
+      normalMap: asset.normalMap,
+      normalScale: new THREE.Vector2(0.55, 0.55),
+      roughnessMap: asset.roughnessMap,
+      roughness: 1,
+      sheen: 0.6,
+      sheenColor: new THREE.Color(0xffc6b4),
+      sheenRoughness: 0.45,
+      clearcoat: 0.001,
+      specularIntensity: 0.55,
+      specularColor: new THREE.Color(0xfff0e8),
+    });
+    patchSkinMaterial(mat, this.paint);
+    this.foot = new THREE.Mesh(g, mat);
+    this.foot.castShadow = true;
+    this.foot.receiveShadow = true;
+
+    // Static copy for picking (BVH), so deformation never breaks hit tests.
+    const rg = g.clone();
+    this.bvh = rg.computeBoundsTree();
+    this.rayMesh = new THREE.Mesh(rg, new THREE.MeshBasicMaterial({ visible: false }));
+    this.footGroup.add(this.foot, this.rayMesh, ...asset.extras);
+    for (const x of asset.extras) {
+      x.castShadow = true;
+      x.receiveShadow = true;
+    }
+
+    const pos = g.attributes.position.array as Float32Array;
     this.base = Float32Array.from(pos);
+    this.baseN = Float32Array.from(g.attributes.normal.array as Float32Array);
     this.off = new Float32Array(pos.length);
     this.vel = new Float32Array(pos.length);
     this.target = new Float32Array(pos.length);
-
-    this.gridW = GRID_W;
-    this.gridH = Math.round((GRID_W * this.texH) / this.texW);
-    this.cell = this.texW / this.gridW;
-    const gridLen = this.gridW * this.gridH;
-
-    this.overlay = new Container();
-    this.layers = {} as Record<LayerId, PaintLayer>;
-    for (const d of LAYER_DEFS) {
-      const l = new PaintLayer(d.id, this.skin.geometry, this.texW, this.texH, gridLen);
-      l.mesh.tint = d.tint;
-      l.mesh.alpha = d.alpha;
-      l.mesh.blendMode = d.blend;
-      this.layers[d.id] = l;
-      this.overlay.addChild(l.mesh);
+    this.hash.clear();
+    for (let i = 0; i < pos.length / 3; i++) {
+      const k = this.hashKey(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]);
+      let list = this.hash.get(k);
+      if (!list) this.hash.set(k, (list = []));
+      list.push(i);
     }
-
-    this.maskMesh = null;
-    if (def.mask) {
-      const maskTex: Texture = await Assets.load(def.mask);
-      this.maskMesh = new Mesh({ geometry: this.skin.geometry, texture: maskTex });
-      this.overlay.mask = this.maskMesh;
-      await this.buildMaskGrid(def.mask);
-    } else {
-      this.maskGrid = new Uint8Array(gridLen).fill(1);
-    }
-    this.maskCells = [];
-    let sx = 0;
-    let sy = 0;
-    let x0 = Infinity;
-    let y0 = Infinity;
-    let x1 = -Infinity;
-    let y1 = -Infinity;
-    for (let i = 0; i < gridLen; i++) {
-      if (!this.maskGrid[i]) continue;
-      this.maskCells.push(i);
-      const c = this.cellCenter(i);
-      sx += c.x;
-      sy += c.y;
-      x0 = Math.min(x0, c.x);
-      y0 = Math.min(y0, c.y);
-      x1 = Math.max(x1, c.x);
-      y1 = Math.max(y1, c.y);
-    }
-    const n = Math.max(1, this.maskCells.length);
-    this.maskCenter = { x: sx / n, y: sy / n };
-    this.maskBox = { x0, y0, x1, y1 };
-
-    this.attachedC = new Container();
-    this.fx = new Container();
-    this.stageC.addChild(this.skin, this.overlay);
-    if (this.maskMesh) this.stageC.addChild(this.maskMesh);
-    this.stageC.addChild(this.attachedC, this.fx);
-    this.layout();
+    this.extraRest = asset.extras.map((x) => ({ o: x, p: x.position.clone(), vi: this.nearestVertex(x.position) }));
   }
 
-  private async buildMaskGrid(src: string) {
-    const img = new Image();
-    img.src = src;
-    await img.decode();
-    const cv = document.createElement('canvas');
-    cv.width = this.gridW;
-    cv.height = this.gridH;
-    const c = cv.getContext('2d', { willReadFrequently: true })!;
-    c.drawImage(img, 0, 0, this.gridW, this.gridH);
-    const data = c.getImageData(0, 0, this.gridW, this.gridH).data;
-    this.maskGrid = new Uint8Array(this.gridW * this.gridH);
-    for (let i = 0; i < this.maskGrid.length; i++) this.maskGrid[i] = data[i * 4 + 3] > 128 && data[i * 4] > 128 ? 1 : 0;
+  private extraRest: { o: THREE.Object3D; p: THREE.Vector3; vi: number }[] = [];
+
+  private hashKey(x: number, y: number, z: number) {
+    const c = 0.008;
+    return ((Math.floor(x / c) + 512) * 1024 + (Math.floor(y / c) + 512)) * 1024 + (Math.floor(z / c) + 512);
   }
 
-  private layout() {
-    if (!this.skin) return;
-    const W = this.app.screen.width;
-    const H = this.app.screen.height;
-    const s = Math.max(W / this.texW, H / this.texH);
-    this.stageC.scale.set(s);
-    this.stageC.position.set((W - this.texW * s) / 2, (H - this.texH * s) / 2);
-    this.world.pivot.set(W / 2, H / 2);
-    this.world.position.set(W / 2, H / 2);
+  nearestVertex(p: THREE.Vector3) {
+    const c = 0.008;
+    let best = -1;
+    let bd = Infinity;
+    for (let r = 1; r <= 3 && best < 0; r++)
+      for (let dx = -r; dx <= r; dx++)
+        for (let dy = -r; dy <= r; dy++)
+          for (let dz = -r; dz <= r; dz++) {
+            const list = this.hash.get(this.hashKey(p.x + dx * c, p.y + dy * c, p.z + dz * c));
+            if (!list) continue;
+            for (const i of list) {
+              const d = (this.base[i * 3] - p.x) ** 2 + (this.base[i * 3 + 1] - p.y) ** 2 + (this.base[i * 3 + 2] - p.z) ** 2;
+              if (d < bd) {
+                bd = d;
+                best = i;
+              }
+            }
+          }
+    return Math.max(0, best);
+  }
+
+  /** Closest point on the skin with its normal and UV. */
+  surfaceAt(p: THREE.Vector3) {
+    const hit = this.bvh.closestPointToPoint(p);
+    if (!hit) return null;
+    return this.faceInfo(hit.faceIndex, hit.point);
+  }
+
+  private faceInfo(face: number, point: THREE.Vector3) {
+    const g = this.rayMesh.geometry;
+    const idx = g.index!;
+    const [a, b, c] = [idx.getX(face * 3), idx.getX(face * 3 + 1), idx.getX(face * 3 + 2)];
+    const pa = new THREE.Vector3().fromBufferAttribute(g.attributes.position, a);
+    const pb = new THREE.Vector3().fromBufferAttribute(g.attributes.position, b);
+    const pc = new THREE.Vector3().fromBufferAttribute(g.attributes.position, c);
+    const bary = new THREE.Vector3();
+    THREE.Triangle.getBarycoord(point, pa, pb, pc, bary);
+    const uvA = g.attributes.uv;
+    const uv = new THREE.Vector2(
+      uvA.getX(a) * bary.x + uvA.getX(b) * bary.y + uvA.getX(c) * bary.z,
+      uvA.getY(a) * bary.x + uvA.getY(b) * bary.y + uvA.getY(c) * bary.z,
+    );
+    const nA = g.attributes.normal;
+    const n = new THREE.Vector3(
+      nA.getX(a) * bary.x + nA.getX(b) * bary.y + nA.getX(c) * bary.z,
+      nA.getY(a) * bary.x + nA.getY(b) * bary.y + nA.getY(c) * bary.z,
+      nA.getZ(a) * bary.x + nA.getZ(b) * bary.y + nA.getZ(c) * bary.z,
+    ).normalize();
+    return { p: point.clone(), n, uv };
   }
 
   // -------------------------------------------------------------------------
   // Procedures
 
   setProcedure(p: Procedure | null) {
-    const cur = this.procedure?.steps[this.stepIndex];
-    cur?.exit?.();
+    this.procedure?.steps[this.stepIndex]?.exit?.();
     this.hooks.loop('*', false);
     this.procedure?.dispose?.();
     this.procedure = p;
@@ -414,6 +478,7 @@ export class Engine {
     this.stepDoneAt = 0;
     this.finished = false;
     this.lastView = '';
+    this.toolPose = { jitter: 0, tilt: 0, lift: 0, spin: 0 };
     if (p) p.steps[0].enter?.();
     this.applyCursor();
     this.emitView(true);
@@ -432,18 +497,23 @@ export class Engine {
   }
 
   applyCursor() {
-    const name = this.step?.cursor;
-    const cfg = name ? CURSORS[name] : null;
-    if (!name || !cfg) {
-      this.cursor.visible = false;
-      this.cursor.texture = this.T.soft;
-      return;
+    const name = this.finished ? null : (this.step?.cursor ?? null);
+    if (name === this.toolName) return;
+    this.tool?.removeFromParent();
+    this.toolName = name;
+    this.tool = null;
+    if (!name) return;
+    let t = this.toolCache.get(name);
+    if (!t) {
+      t = createTool(name, this.M, this.T);
+      t.traverse((o) => {
+        o.castShadow = true;
+      });
+      this.toolCache.set(name, t);
     }
-    const tex = this.T[name];
-    this.cursor.texture = tex;
-    this.cursor.anchor.set(cfg.anchor[0], cfg.anchor[1]);
-    this.cursor.rotation = cfg.rot;
-    this.cursor.scale.set(cfg.h / tex.height);
+    this.tool = t;
+    t.visible = false;
+    this.root.add(t);
   }
 
   private emitView(force = false) {
@@ -490,314 +560,318 @@ export class Engine {
     this.stepDoneAt = 0;
     s.exit?.();
     this.hooks.loop('*', false);
+    this.toolPose = { jitter: 0, tilt: 0, lift: 0, spin: 0 };
     if (this.stepIndex < p.steps.length - 1) {
       this.stepIndex++;
       this.step!.enter?.();
-      this.applyCursor();
     } else {
       this.finished = true;
-      this.cursor.visible = false;
       this.hooks.onFinish(p.id, p.accuracy());
       this.celebrate();
     }
+    this.applyCursor();
     this.emitView(true);
   }
 
   // -------------------------------------------------------------------------
   // Input
 
-  private toTex(gx: number, gy: number) {
-    const p = this.stageC.toLocal({ x: gx, y: gy });
-    return p;
+  private pick(clientX: number, clientY: number) {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const ndc = new THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
+    this.raycaster.setFromCamera(ndc, this.camera);
+    const hit = this.raycaster.intersectObject(this.rayMesh, false)[0];
+    if (!hit || hit.faceIndex == null) return null;
+    return this.faceInfo(hit.faceIndex, hit.point);
   }
 
-  private onDown(e: FederatedPointerEvent) {
-    if (!e.isPrimary) return;
-    this.tipOffset = e.pointerType === 'touch' ? 56 : 0;
-    const t = this.toTex(e.global.x, e.global.y - this.tipOffset);
-    this.ptr = { x: t.x, y: t.y, dx: 0, dy: 0, speed: 0, down: true };
-    this.pointerInside = true;
-    this.placeCursor(e.global.x, e.global.y);
-    if (!this.finished) this.step?.down?.(this.ptr);
-  }
-
-  private lastMoveT = 0;
-  private onMove(e: FederatedPointerEvent) {
-    if (!e.isPrimary) return;
-    this.pointerInside = true;
-    if (e.pointerType !== 'touch') this.tipOffset = 0;
-    this.placeCursor(e.global.x, e.global.y);
-    const t = this.toTex(e.global.x, e.global.y - this.tipOffset);
+  private updatePtr(e: PointerEvent) {
+    const h = this.pick(e.clientX, e.clientY - this.tipOffset);
+    if (!h) {
+      this.ptr.hit = false;
+      return false;
+    }
     const now = performance.now();
     const dt = Math.max((now - this.lastMoveT) / 1000, 1 / 240);
     this.lastMoveT = now;
-    const dx = t.x - this.ptr.x;
-    const dy = t.y - this.ptr.y;
-    const speed = Math.hypot(dx, dy) / dt;
-    this.ptr = { x: t.x, y: t.y, dx, dy, speed: this.ptr.speed * 0.6 + speed * 0.4, down: this.ptr.down };
+    if (this.ptr.hit) this.ptr.delta.subVectors(h.p, this.ptr.p);
+    else this.ptr.delta.set(0, 0, 0);
+    const speed = this.ptr.delta.length() / dt;
+    this.ptr.speed = this.ptr.speed * 0.6 + speed * 0.4;
+    this.ptr.p.copy(h.p);
+    this.ptr.n.copy(h.n);
+    this.ptr.uv.copy(h.uv);
+    this.ptr.hit = true;
+    return true;
+  }
+
+  private onDown(e: PointerEvent) {
+    this.pointers.add(e.pointerId);
+    this.pointerType = e.pointerType;
+    if (this.pointers.size > 1 || e.button !== 0) {
+      // Second finger: camera gesture — cancel the stroke.
+      if (this.ptr.down) {
+        this.ptr.down = false;
+        this.step?.up?.(this.ptr);
+      }
+      return;
+    }
+    this.tipOffset = e.pointerType === 'touch' ? 56 : 0;
+    this.ptr.hit = false;
+    if (!this.updatePtr(e)) return;
+    this.ptr.down = true;
+    if (!this.finished) this.step?.down?.(this.ptr);
+  }
+
+  private onMove(e: PointerEvent) {
+    if (this.pointers.size > 1) return;
+    this.pointerType = e.pointerType;
+    if (e.pointerType !== 'touch') this.tipOffset = 0;
+    const wasHit = this.ptr.hit;
+    if (!this.updatePtr(e)) return;
+    if (!wasHit) this.ptr.delta.set(0, 0, 0);
     if (this.ptr.down && !this.finished) this.step?.move?.(this.ptr);
   }
 
-  private onUp(e: FederatedPointerEvent) {
-    if (!e.isPrimary) return;
+  private onUp(e: PointerEvent) {
+    this.pointers.delete(e.pointerId);
+    if (!this.ptr.down) return;
     this.ptr.down = false;
     if (!this.finished) this.step?.up?.(this.ptr);
-  }
-
-  private placeCursor(sx: number, sy: number) {
-    this.cursor.position.set(sx, sy - this.tipOffset);
+    if (e.pointerType === 'touch') this.ptr.hit = false;
   }
 
   // -------------------------------------------------------------------------
-  // Painting & coverage
+  // Painting
 
-  cellIndex(x: number, y: number) {
-    const cx = Math.floor(x / this.cell);
-    const cy = Math.floor(y / this.cell);
-    if (cx < 0 || cy < 0 || cx >= this.gridW || cy >= this.gridH) return -1;
-    return cy * this.gridW + cx;
+  stamp(layer: LayerId, p: THREE.Vector3 | THREE.Vector2, r: number, o: StampOpts = {}) {
+    const uv = p instanceof THREE.Vector2 ? p : this.surfaceAt(p)?.uv;
+    if (uv) this.paint.stamp(layer, uv, r, o);
   }
 
-  cellCenter(i: number) {
-    return { x: ((i % this.gridW) + 0.5) * this.cell, y: (Math.floor(i / this.gridW) + 0.5) * this.cell };
+  /** Stamps along a world-space segment, snapped to the skin. */
+  paintLine(layer: LayerId, a: THREE.Vector3, b: THREE.Vector3, r: number, o: StampOpts = {}, spacing = 0.35) {
+    const d = a.distanceTo(b);
+    const n = Math.min(40, Math.max(1, Math.ceil(d / Math.max(1e-5, r * spacing))));
+    for (let k = 1; k <= n; k++) this.stamp(layer, tmpV2.lerpVectors(a, b, k / n), r, o);
   }
 
-  inMask(x: number, y: number) {
-    const i = this.cellIndex(x, y);
-    return i >= 0 && this.maskGrid[i] === 1;
+  coverage(layer: LayerId, cells?: number[], thr = 0.5) {
+    return this.paint.coverage(layer, cells, thr);
   }
 
-  cellsInCircle(x: number, y: number, r: number, maskOnly = true) {
-    const out: number[] = [];
-    const c0 = Math.max(0, Math.floor((x - r) / this.cell));
-    const c1 = Math.min(this.gridW - 1, Math.floor((x + r) / this.cell));
-    const r0 = Math.max(0, Math.floor((y - r) / this.cell));
-    const r1 = Math.min(this.gridH - 1, Math.floor((y + r) / this.cell));
-    for (let cy = r0; cy <= r1; cy++)
-      for (let cx = c0; cx <= c1; cx++) {
-        const i = cy * this.gridW + cx;
-        if (maskOnly && !this.maskGrid[i]) continue;
-        const c = this.cellCenter(i);
-        if ((c.x - x) ** 2 + (c.y - y) ** 2 <= r * r) out.push(i);
+  cellsInSphere(p: THREE.Vector3, r: number) {
+    return this.paint.cellsInSphere(p, r);
+  }
+
+  fadeLayer(layer: LayerId, amount: number) {
+    this.paint.fade(layer, amount);
+  }
+
+  clearLayer(layer: LayerId) {
+    this.paint.clear(layer);
+  }
+
+  amountAt(layer: LayerId, uv: THREE.Vector2) {
+    return this.paint.amountAt(layer, uv);
+  }
+
+  /** Random point on the sole, away from the edges and from `avoid`. */
+  randomSolePoint(avoid: THREE.Vector3[] = [], minDist = 0, yMin = -Infinity, yMax = Infinity) {
+    const P = this.paint;
+    for (let tries = 0; tries < 300; tries++) {
+      const c = P.validCells[Math.floor(Math.random() * P.validCells.length)];
+      const p = P.cellWorld(c);
+      if (p.y < yMin || p.y > yMax) continue;
+      const x = c % 64;
+      const y = Math.floor(c / 64);
+      let inner = true;
+      for (let dy = -2; dy <= 2 && inner; dy++) for (let dx = -2; dx <= 2; dx++) if (!P.valid[(y + dy) * 64 + x + dx]) inner = false;
+      if (!inner) continue;
+      if (avoid.every((a) => a.distanceTo(p) >= minDist)) {
+        const s = this.surfaceAt(p);
+        if (s) return s;
       }
-    return out;
-  }
-
-  cellsInPolygon(poly: { x: number; y: number }[]) {
-    const out: number[] = [];
-    for (let i = 0; i < this.gridW * this.gridH; i++) {
-      const c = this.cellCenter(i);
-      if (pointInPoly(c.x, c.y, poly)) out.push(i);
     }
-    return out;
-  }
-
-  /** Stamp a brush into a layer. erase=true removes paint. Updates the coverage grid. */
-  stamp(
-    id: LayerId,
-    x: number,
-    y: number,
-    r: number,
-    o: { alpha?: number; tint?: number; tex?: TexName; erase?: boolean; rot?: number; gain?: number } = {},
-  ) {
-    const l = this.layers[id];
-    if (!l) return;
-    const s = l.next(this.T[o.tex ?? 'soft']);
-    s.position.set(x, y);
-    s.width = s.height = r * 2;
-    s.rotation = o.rot ?? Math.random() * Math.PI * 2;
-    s.alpha = o.alpha ?? 1;
-    s.tint = o.tint ?? 0xffffff;
-    s.blendMode = o.erase ? 'erase' : 'normal';
-    this.dirty.add(l);
-
-    const a = (o.alpha ?? 1) * (o.gain ?? 1.2);
-    const g = l.grid;
-    for (const i of this.cellsInCircle(x, y, r * 0.8, false)) g[i] = o.erase ? Math.max(0, g[i] - a * 1.3) : Math.min(1, g[i] + a);
-  }
-
-  /** Stamps along a segment with spacing proportional to brush size. */
-  paintLine(id: LayerId, x0: number, y0: number, x1: number, y1: number, r: number, o: Parameters<Engine['stamp']>[4] = {}, spacing = 0.35) {
-    const d = Math.hypot(x1 - x0, y1 - y0);
-    const n = Math.max(1, Math.ceil(d / Math.max(1, r * spacing)));
-    for (let k = 1; k <= n; k++) this.stamp(id, x0 + ((x1 - x0) * k) / n, y0 + ((y1 - y0) * k) / n, r, o);
-  }
-
-  /** Fraction of cells (default: whole mask) with paint >= thr. */
-  coverage(id: LayerId, cells: number[] = this.maskCells, thr = 0.5) {
-    if (!cells.length) return 0;
-    const g = this.layers[id].grid;
-    let n = 0;
-    for (const i of cells) if (g[i] >= thr) n++;
-    return n / cells.length;
-  }
-
-  clearLayer(id: LayerId) {
-    const l = this.layers[id];
-    l.grid.fill(0);
-    this.app.renderer.render({ container: new Container(), target: l.rt, clear: true });
-  }
-
-  /** Fade a layer by erasing it uniformly. */
-  fadeLayer(id: LayerId, amount: number) {
-    const l = this.layers[id];
-    const s = l.next(this.T.hard);
-    s.texture = this.T.hard;
-    s.position.set(this.texW / 2, this.texH / 2);
-    s.width = this.texW * 3;
-    s.height = this.texH * 3;
-    s.rotation = 0;
-    s.tint = 0xffffff;
-    s.alpha = amount;
-    s.blendMode = 'erase';
-    this.dirty.add(l);
-    for (let i = 0; i < l.grid.length; i++) l.grid[i] = Math.max(0, l.grid[i] - amount);
-  }
-
-  private flushPaint() {
-    for (const l of this.dirty) {
-      this.app.renderer.render({ container: l.batch, target: l.rt, clear: false });
-      for (let i = 0; i < l.used; i++) l.pool[i].visible = false;
-      l.used = 0;
-    }
-    this.dirty.clear();
+    return this.surfaceAt(this.L.center)!;
   }
 
   // -------------------------------------------------------------------------
   // Soft-body skin
 
-  /** Push skin near (x,y) by (dx,dy) this frame. */
-  force(x: number, y: number, r: number, dx: number, dy: number) {
-    this.forces.push({ x, y, r, dx, dy, pinch: 0 });
+  /** Drag skin near p by d this frame. */
+  force(p: THREE.Vector3, r: number, d: THREE.Vector3) {
+    this.forces.push({ p: p.clone(), r, d: d.clone(), push: 0 });
   }
 
-  /** Pull skin toward (x,y): a dent under a fingertip / needle. */
-  pinch(x: number, y: number, r: number, strength: number) {
-    this.forces.push({ x, y, r, dx: 0, dy: 0, pinch: strength });
+  /** Press the skin in along its normal (negative depth = bulge out). */
+  press(p: THREE.Vector3, r: number, depth: number) {
+    this.forces.push({ p: p.clone(), r, d: new THREE.Vector3(), push: depth });
   }
 
-  /** Random velocity kick: twitch, flinch. */
-  kick(x: number, y: number, r: number, amount: number) {
-    const { base, vel } = this;
-    for (let i = 0; i < base.length; i += 2) {
-      const d2 = (base[i] - x) ** 2 + (base[i + 1] - y) ** 2;
-      const f = Math.exp(-d2 / (r * r));
-      if (f < 0.02) continue;
-      vel[i] += (Math.random() - 0.5) * amount * f;
-      vel[i + 1] += (Math.random() - 0.5) * amount * f;
+  /** Instant push along the skin normal (a drop landing, a needle going in). */
+  impulse(p: THREE.Vector3, r: number, amount: number) {
+    const { base, baseN, vel } = this;
+    const r2 = r * r;
+    for (let i = 0; i < base.length; i += 3) {
+      const d2 = (base[i] - p.x) ** 2 + (base[i + 1] - p.y) ** 2 + (base[i + 2] - p.z) ** 2;
+      if (d2 > r2 * 4) continue;
+      const f = Math.exp(-d2 / r2) * amount;
+      vel[i] -= baseN[i] * f;
+      vel[i + 1] -= baseN[i + 1] * f;
+      vel[i + 2] -= baseN[i + 2] * f;
+      this.moving = true;
     }
   }
 
-  /** Skin displacement at a texture point (to keep attached things glued to the skin). */
-  skinOffset(x: number, y: number) {
-    const ix = Math.round((x / this.texW) * (this.vx - 1));
-    const iy = Math.round((y / this.texH) * (this.vy - 1));
-    if (ix < 0 || iy < 0 || ix >= this.vx || iy >= this.vy) return { x: 0, y: 0 };
-    const k = (iy * this.vx + ix) * 2;
-    return { x: this.off[k], y: this.off[k + 1] };
+  kick(p: THREE.Vector3, r: number, amount: number) {
+    const { base, vel } = this;
+    const r2 = r * r;
+    for (let i = 0; i < base.length; i += 3) {
+      const d2 = (base[i] - p.x) ** 2 + (base[i + 1] - p.y) ** 2 + (base[i + 2] - p.z) ** 2;
+      if (d2 > r2 * 4) continue;
+      const f = Math.exp(-d2 / r2);
+      vel[i] += (Math.random() - 0.5) * amount * f;
+      vel[i + 1] += (Math.random() - 0.5) * amount * f;
+      vel[i + 2] += (Math.random() - 0.5) * amount * f;
+      this.moving = true;
+    }
+  }
+
+  /** Current displacement of the skin near p. */
+  skinOffset(vi: number, out = new THREE.Vector3()) {
+    return out.set(this.off[vi * 3], this.off[vi * 3 + 1], this.off[vi * 3 + 2]);
   }
 
   private updateSkin(dt: number) {
-    const { base, off, vel, target, forces } = this;
+    const { base, baseN, off, vel, target, forces } = this;
+    if (!forces.length && !this.moving) return;
     target.fill(0);
     for (const f of forces) {
       const r2 = f.r * f.r;
-      for (let i = 0; i < base.length; i += 2) {
-        const ex = base[i] - f.x;
-        const ey = base[i + 1] - f.y;
-        const d2 = ex * ex + ey * ey;
+      for (let i = 0; i < base.length; i += 3) {
+        const ex = base[i] - f.p.x;
+        const ey = base[i + 1] - f.p.y;
+        const ez = base[i + 2] - f.p.z;
+        const d2 = ex * ex + ey * ey + ez * ez;
         if (d2 > r2 * 4) continue;
         const w = Math.exp(-d2 / r2);
-        target[i] += f.dx * w - ex * f.pinch * w;
-        target[i + 1] += f.dy * w - ey * f.pinch * w;
+        target[i] += (f.d.x - baseN[i] * f.push) * w;
+        target[i + 1] += (f.d.y - baseN[i + 1] * f.push) * w;
+        target[i + 2] += (f.d.z - baseN[i + 2] * f.push) * w;
       }
     }
     forces.length = 0;
-    const k = 220;
-    const damp = Math.exp(-14 * dt);
+    const k = 260;
+    const damp = Math.exp(-15 * dt);
     let moving = false;
     for (let i = 0; i < base.length; i++) {
       vel[i] = (vel[i] + (target[i] - off[i]) * k * dt) * damp;
       off[i] += vel[i] * dt;
-      if (Math.abs(off[i]) > 0.01 || Math.abs(vel[i]) > 0.01) moving = true;
+      if (!moving && (Math.abs(off[i]) > 1e-6 || Math.abs(vel[i]) > 1e-5)) moving = true;
     }
-    if (!moving) return;
-    const pos = this.skin.geometry.positions;
-    const bx = this.vx - 1;
-    const by = this.vy - 1;
-    for (let i = 0; i < base.length; i += 2) {
-      // Keep the outer border fixed so the image never shows gaps.
-      const v = i / 2;
-      const gx = v % this.vx;
-      const gy = Math.floor(v / this.vx);
-      const edge = gx === 0 || gy === 0 || gx === bx || gy === by;
-      pos[i] = base[i] + (edge ? 0 : off[i]);
-      pos[i + 1] = base[i + 1] + (edge ? 0 : off[i + 1]);
-    }
-    this.skin.geometry.getBuffer('aPosition').update();
+    this.moving = moving;
+    const pos = this.foot.geometry.attributes.position;
+    const arr = pos.array as Float32Array;
+    for (let i = 0; i < base.length; i++) arr[i] = base[i] + off[i];
+    pos.needsUpdate = true;
+    this.foot.geometry.computeVertexNormals();
+    for (const x of this.extraRest) x.o.position.copy(x.p).add(this.skinOffset(x.vi, tmpV));
   }
 
   // -------------------------------------------------------------------------
-  // Sprites, particles, tweens
+  // Objects, particles, decals, tweens
 
-  sprite(tex: TexName, x: number, y: number, size: number, o: { anchor?: [number, number]; tint?: number; alpha?: number; rot?: number } = {}) {
-    const s = new Sprite(this.T[tex]);
-    s.anchor.set(...(o.anchor ?? [0.5, 0.5]));
-    s.position.set(x, y);
-    s.scale.set(size / s.texture.width);
-    s.tint = o.tint ?? 0xffffff;
-    s.alpha = o.alpha ?? 1;
-    s.rotation = o.rot ?? 0;
-    return s;
+  /** Keeps an object glued to the skin at p (follows deformation). */
+  attach<T extends THREE.Object3D>(o: T, p: THREE.Vector3, n?: THREE.Vector3) {
+    o.position.copy(p);
+    if (n) o.quaternion.setFromUnitVectors(UP, n);
+    this.attached.push({ o, p: p.clone(), vi: this.nearestVertex(p) });
+    this.root.add(o);
+    return o;
   }
 
-  /** Adds a sprite that moves with the deforming skin. */
-  attach<T extends Sprite | Container>(s: T, x: number, y: number) {
-    this.attached.push({ s, x, y });
-    this.attachedC.addChild(s);
-    return s;
-  }
-
-  detach(s: Sprite | Container) {
-    this.attached = this.attached.filter((a) => a.s !== s);
-    s.destroy();
-  }
-
-  moveAttached(s: Sprite | Container, x: number, y: number) {
-    const a = this.attached.find((q) => q.s === s);
+  moveAttached(o: THREE.Object3D, p: THREE.Vector3) {
+    const a = this.attached.find((q) => q.o === o);
     if (a) {
-      a.x = x;
-      a.y = y;
+      a.p.copy(p);
+      a.vi = this.nearestVertex(p);
     }
+  }
+
+  detach(o: THREE.Object3D) {
+    this.attached = this.attached.filter((a) => a.o !== o);
+    o.removeFromParent();
+    o.traverse((x) => {
+      const m = x as THREE.Mesh;
+      if (m.isMesh && m.geometry && !(m.geometry as unknown as { shared?: boolean }).shared) m.geometry.dispose();
+    });
+  }
+
+  /** A sticker that wraps over the skin (bandage, wound, film). */
+  decal(material: THREE.Material, p: THREE.Vector3, n: THREE.Vector3, size: THREE.Vector3, rot = 0) {
+    const helper = new THREE.Object3D();
+    helper.position.copy(p);
+    helper.lookAt(tmpV.copy(p).add(n));
+    helper.rotateZ(rot);
+    this.rayMesh.updateMatrixWorld();
+    const geo = new DecalGeometry(this.rayMesh, p, helper.rotation, size);
+    const m = new THREE.Mesh(geo, material);
+    m.receiveShadow = true;
+    m.renderOrder = 2;
+    const holder = new THREE.Group();
+    holder.add(m);
+    m.position.sub(p);
+    this.attach(holder, p);
+    return holder;
+  }
+
+  sprite(tex: TexName) {
+    let t = this.spriteTex.get(tex);
+    if (!t) {
+      t = new THREE.CanvasTexture(this.T[tex]);
+      t.colorSpace = THREE.SRGBColorSpace;
+      this.spriteTex.set(tex, t);
+    }
+    return t;
   }
 
   particle(
     tex: TexName,
-    x: number,
-    y: number,
+    p: THREE.Vector3,
     size: number,
-    o: Partial<Omit<Particle, 's'>> & { tint?: number; alpha?: number; rot?: number; blend?: 'add' | 'normal' } = {},
+    o: { v?: THREE.Vector3; g?: number; max?: number; grow?: number; spin?: number; fade?: boolean; tint?: number; alpha?: number; add?: boolean; onEnd?: () => void } = {},
   ) {
-    const s = this.sprite(tex, x, y, size, { tint: o.tint, alpha: o.alpha, rot: o.rot ?? Math.random() * 6.28 });
-    if (o.blend) s.blendMode = o.blend;
-    this.fx.addChild(s);
-    this.particles.push({ s, vx: o.vx ?? 0, vy: o.vy ?? 0, g: o.g ?? 0, life: 0, max: o.max ?? 1, grow: o.grow ?? 0, spin: o.spin ?? 0, fade: o.fade ?? true, onEnd: o.onEnd });
+    const mat = new THREE.SpriteMaterial({
+      map: this.sprite(tex),
+      color: o.tint ?? 0xffffff,
+      opacity: o.alpha ?? 1,
+      transparent: true,
+      depthWrite: false,
+      blending: o.add ? THREE.AdditiveBlending : THREE.NormalBlending,
+      rotation: Math.random() * Math.PI * 2,
+    });
+    const s = new THREE.Sprite(mat);
+    s.position.copy(p);
+    s.scale.setScalar(size);
+    s.renderOrder = 5;
+    this.root.add(s);
+    this.particles.push({ s, v: o.v?.clone() ?? new THREE.Vector3(), g: o.g ?? 0, life: 0, max: o.max ?? 1, grow: o.grow ?? 0, spin: o.spin ?? 0, fade: o.fade ?? true, onEnd: o.onEnd });
     return s;
   }
 
-  floatText(x: number, y: number, text: string, color = 0xffffff, size = 46) {
-    const t = new Text({
-      text,
-      style: { fontFamily: 'Outfit, sans-serif', fontSize: size * this.u, fontWeight: '800', fill: color, stroke: { color: 0x000000, width: 5 * this.u } },
-    });
-    t.anchor.set(0.5);
-    t.position.set(x, y);
-    this.fx.addChild(t);
-    this.particles.push({ s: t, vx: (Math.random() - 0.5) * 40 * this.u, vy: -160 * this.u, g: 60 * this.u, life: 0, max: 1.1, grow: 0.2, spin: 0, fade: true });
+  floatText(p: THREE.Vector3, text: string, color = '#fff', size = 22) {
+    const el = document.createElement('div');
+    el.className = 'float-text';
+    el.textContent = text;
+    el.style.color = color;
+    el.style.fontSize = `${size}px`;
+    this.overlay.appendChild(el);
+    this.texts.push({ el, p: p.clone(), life: 0 });
   }
 
-  ripple(x: number, y: number, color = 0xffffff, size = 60) {
-    this.particle('ring', x, y, size * this.u, { tint: color, grow: 2.2, max: 0.5, rot: 0 });
+  ripple(p: THREE.Vector3, color = 0xffffff, size = 0.012) {
+    this.particle('ring', p.clone().addScaledVector(this.ptr.n, 0.001), size, { tint: color, grow: 2.4, max: 0.5 });
   }
 
   tween(dur: number, fn: (k: number) => void, done?: () => void) {
@@ -812,34 +886,11 @@ export class Engine {
     this.unitAcc = Math.min(this.unitAcc + units, 40);
   }
 
-  /** Random point inside the mask, at least minDist from `avoid`. */
-  randomMaskPoint(avoid: { x: number; y: number }[] = [], minDist = 0, box?: { y0: number; y1: number }) {
-    for (let tries = 0; tries < 200; tries++) {
-      const i = this.maskCells[Math.floor(Math.random() * this.maskCells.length)];
-      if (i === undefined) break;
-      const c = this.cellCenter(i);
-      if (box && (c.y < box.y0 || c.y > box.y1)) continue;
-      // Stay away from the mask border.
-      if (this.cellsInCircle(c.x, c.y, this.cell * 2.2).length < 13) continue;
-      if (avoid.every((a) => Math.hypot(a.x - c.x, a.y - c.y) >= minDist)) return c;
-    }
-    return { ...this.maskCenter };
-  }
-
   private celebrate() {
-    const { x, y } = this.maskCenter;
-    for (let i = 0; i < 26; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const v = (200 + Math.random() * 400) * this.u;
-      this.particle(i % 3 ? 'sparkle' : 'heart', x, y, (20 + Math.random() * 30) * this.u, {
-        vx: Math.cos(a) * v,
-        vy: Math.sin(a) * v - 200 * this.u,
-        g: 500 * this.u,
-        max: 1.3,
-        spin: 3,
-        blend: i % 3 ? 'add' : 'normal',
-        tint: i % 3 ? 0xfff3b0 : 0xffffff,
-      });
+    const c = this.L.center.clone().add(new THREE.Vector3(0, 0, 0.03));
+    for (let i = 0; i < 30; i++) {
+      const v = new THREE.Vector3((Math.random() - 0.5) * 0.25, Math.random() * 0.2, (Math.random() - 0.2) * 0.15);
+      this.particle(i % 3 ? 'sparkle' : 'heart', c, 0.006 + Math.random() * 0.008, { v, g: -0.35, max: 1.4, spin: 3, add: i % 3 !== 0, tint: i % 3 ? 0xfff3b0 : 0xffffff });
     }
     this.hooks.sfx('success');
     this.hooks.haptic('success');
@@ -847,33 +898,50 @@ export class Engine {
 
   // -------------------------------------------------------------------------
 
-  private update(dt: number) {
-    if (!this.skin) return;
-    this.time += dt;
+  private poseTool() {
+    const t = this.tool;
+    if (!t) return;
+    const touch = this.pointerType === 'touch';
+    t.visible = this.ptr.hit && (this.ptr.down || !touch) && !this.finished;
+    if (!t.visible) return;
+    // Tool axis: mostly along the skin normal, leaning toward the camera.
+    const toCam = tmpV.copy(this.camera.position).sub(this.ptr.p).normalize();
+    const axis = tmpV2.copy(this.ptr.n).multiplyScalar(0.55).add(toCam.multiplyScalar(0.45 + this.toolPose.tilt)).normalize();
+    t.quaternion.setFromUnitVectors(UP, axis);
+    if (this.toolPose.spin) t.rotateY(this.toolPose.spin);
+    const hover = (this.ptr.down ? 0 : 0.006) + this.toolPose.lift;
+    t.position.copy(this.ptr.p).addScaledVector(axis, hover);
+    if (this.toolPose.jitter) t.position.add(new THREE.Vector3((Math.random() - 0.5) * this.toolPose.jitter, (Math.random() - 0.5) * this.toolPose.jitter, (Math.random() - 0.5) * this.toolPose.jitter));
+  }
 
+  private update(dt: number) {
+    if (!this.foot) {
+      this.renderer.render(this.scene, this.camera);
+      return;
+    }
+    this.time += dt;
     this.ptr.speed *= Math.exp(-6 * dt);
+
     const step = this.finished ? null : this.step;
     step?.update?.(dt);
     this.updateSkin(dt);
-    this.flushPaint();
+    this.paint.flush();
 
-    for (const a of this.attached) {
-      const o = this.skinOffset(a.x, a.y);
-      a.s.position.set(a.x + o.x, a.y + o.y);
-    }
+    for (const a of this.attached) a.o.position.copy(a.p).add(this.skinOffset(a.vi, tmpV));
 
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const p = this.particles[i];
       p.life += dt;
-      p.vy += p.g * dt;
-      p.s.x += p.vx * dt;
-      p.s.y += p.vy * dt;
-      p.s.rotation += p.spin * dt;
-      if (p.grow) p.s.scale.set(p.s.scale.x * (1 + p.grow * dt));
-      if (p.fade) p.s.alpha = Math.max(0, 1 - (p.life / p.max) ** 2);
+      p.v.y += p.g * dt;
+      p.s.position.addScaledVector(p.v, dt);
+      const m = p.s.material;
+      m.rotation += p.spin * dt;
+      if (p.grow) p.s.scale.multiplyScalar(1 + p.grow * dt);
+      if (p.fade) m.opacity = Math.max(0, 1 - (p.life / p.max) ** 2);
       if (p.life >= p.max) {
         p.onEnd?.();
-        p.s.destroy();
+        p.s.removeFromParent();
+        m.dispose();
         this.particles.splice(i, 1);
       }
     }
@@ -889,18 +957,28 @@ export class Engine {
       }
     }
 
-    // camera: shake + gentle breathing zoom
+    // Camera: damping, shake, slow breathing
+    this.controls.update();
     this.shakeAmt *= Math.exp(-8 * dt);
-    const b = 1 + Math.sin(this.time * 1.3) * 0.004;
-    this.world.scale.set(b);
-    this.world.position.set(
-      this.app.screen.width / 2 + (Math.random() - 0.5) * this.shakeAmt,
-      this.app.screen.height / 2 + (Math.random() - 0.5) * this.shakeAmt,
-    );
+    this.root.position.set((Math.random() - 0.5) * this.shakeAmt * 0.0004, (Math.random() - 0.5) * this.shakeAmt * 0.0004, 0);
+    this.footGroup.rotation.x = Math.sin(this.time * 1.2) * 0.004;
 
-    // cursor: visible while touching (or hovering with a mouse)
-    const hasCursor = !!step?.cursor;
-    this.cursor.visible = hasCursor && (this.ptr.down || (this.pointerInside && this.tipOffset === 0));
+    this.poseTool();
+
+    // Floating DOM texts
+    const w = this.host.clientWidth;
+    const h = this.host.clientHeight;
+    for (let i = this.texts.length - 1; i >= 0; i--) {
+      const t = this.texts[i];
+      t.life += dt;
+      const v = tmpV.copy(t.p).project(this.camera);
+      t.el.style.transform = `translate(${((v.x + 1) / 2) * w}px, ${((1 - v.y) / 2) * h - t.life * 60}px) translate(-50%, -50%) scale(${1 + t.life * 0.2})`;
+      t.el.style.opacity = String(Math.max(0, 1 - (t.life / 1.2) ** 2));
+      if (t.life > 1.2) {
+        t.el.remove();
+        this.texts.splice(i, 1);
+      }
+    }
 
     // units → coins, capped to what the server accepts
     this.unitTokens = Math.min(18, this.unitTokens + dt * 18);
@@ -913,28 +991,6 @@ export class Engine {
 
     this.advance();
     if (Math.floor(this.time * 10) !== Math.floor((this.time - dt) * 10)) this.emitView();
+    this.renderer.render(this.scene, this.camera);
   }
-}
-
-export function pointInPoly(x: number, y: number, poly: { x: number; y: number }[]) {
-  let inside = false;
-  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-    const a = poly[i];
-    const b = poly[j];
-    if (a.y > y !== b.y > y && x < ((b.x - a.x) * (y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
-  }
-  return inside;
-}
-
-export function distToPath(x: number, y: number, pts: { x: number; y: number }[]) {
-  let best = Infinity;
-  for (let i = 1; i < pts.length; i++) {
-    const a = pts[i - 1];
-    const b = pts[i];
-    const vx = b.x - a.x;
-    const vy = b.y - a.y;
-    const t = Math.max(0, Math.min(1, ((x - a.x) * vx + (y - a.y) * vy) / (vx * vx + vy * vy || 1)));
-    best = Math.min(best, Math.hypot(a.x + vx * t - x, a.y + vy * t - y));
-  }
-  return best;
 }

@@ -1,6 +1,6 @@
-import type { Sprite } from 'pixi.js';
-import { ease, type Engine, type Procedure, type Step } from '../engine.ts';
-import { bandageStep, clamp01, dist, fizz, healStep, rand, rubStep, spray } from './common.ts';
+import * as THREE from 'three';
+import type { Engine, Procedure, Step } from '../engine.ts';
+import { bandageStep, bead, clamp01, downhill, fizz, healStep, rand, rubStep, setBeadSize, spray, tweenTo, type Surf } from './common.ts';
 
 /**
  * Infected cut: rinse dirt, drain pus by pressing AROUND the wound, blot,
@@ -8,28 +8,31 @@ import { bandageStep, clamp01, dist, fizz, healStep, rand, rubStep, spray } from
  * (In-game disclaimer: real abscesses must be drained by a doctor.)
  */
 export function woundProcedure(e: Engine): Procedure {
-  const w = e.randomMaskPoint([], 0, { y0: e.maskBox.y0 + (e.maskBox.y1 - e.maskBox.y0) * 0.35, y1: e.maskBox.y1 - 80 * e.u });
+  const w: Surf = e.randomSolePoint([], 0, 0.04, 0.15);
   const R = 70 * e.u;
-  const region = () => e.cellsInCircle(w.x, w.y, R * 2.2);
-  const angle = rand(-0.5, 0.5);
+  const region = () => e.cellsInSphere(w.p, R * 2.2);
+  const rot = rand(-0.5, 0.5);
   let penalty = 0;
   e.debug.wound = w;
 
-  // Setup: inflamed halo, the cut, a pus pocket and dirt specks.
-  for (let i = 0; i < 6; i++) e.stamp('redness', w.x + rand(-30, 30) * e.u, w.y + rand(-30, 30) * e.u, rand(90, 140) * e.u, { alpha: 0.5 });
-  e.stamp('redness', w.x, w.y, 70 * e.u, { alpha: 0.9 });
-  const cut = e.attach(e.sprite('cut', w.x, w.y, 150 * e.u, { rot: angle }), w.x, w.y);
-  const pocket = e.attach(e.sprite('pus', w.x, w.y, 52 * e.u, { alpha: 0.95 }), w.x, w.y);
-  pocket.scale.y *= 0.8;
-  const specks: Sprite[] = [];
+  // Setup: inflamed halo, swollen abscess with a yellow head, the cut, dirt.
+  for (let i = 0; i < 6; i++) e.stamp('redness', w.p.clone().add(new THREE.Vector3(rand(-1, 1) * 0.006, rand(-1, 1) * 0.006, 0)), rand(90, 140) * e.u, { alpha: 0.5 });
+  e.stamp('redness', w.uv, 70 * e.u, { alpha: 0.9 });
+  e.stamp('pus', w.uv, 16 * e.u, { alpha: 0.75 });
+  const cut = e.decal(e.M.cutDecal.clone(), w.p, w.n, new THREE.Vector3(0.03, 0.015, 0.02), rot);
+  const head = bead(e, w, e.M.pus, 0.0032);
+  const specks: THREE.Mesh[] = [];
+  const dirt = new THREE.MeshStandardMaterial({ color: 0x3a2a1c, roughness: 1 });
   for (let i = 0; i < 9; i++) {
-    const x = w.x + rand(-80, 80) * e.u;
-    const y = w.y + rand(-60, 60) * e.u;
-    specks.push(e.attach(e.sprite('speck', x, y, rand(6, 13) * e.u, { rot: rand(0, 6) }), x, y));
+    const s = e.surfaceAt(w.p.clone().add(new THREE.Vector3(rand(-1, 1) * 0.016, rand(-1, 1) * 0.013, 0)));
+    if (!s) continue;
+    const m = new THREE.Mesh(new THREE.IcosahedronGeometry(rand(0.4, 0.9) * 0.001, 0), dirt);
+    m.scale.y = 0.4;
+    specks.push(e.attach(m, s.p, s.n));
   }
-  const specksTotal = specks.length;
+  const specksTotal = Math.max(1, specks.length);
 
-  // 1. Rinse -------------------------------------------------------------------
+  // 1. Rinse ---------------------------------------------------------------------
   const rinse: Step = {
     title: 'Rinse',
     hint: 'Flush dirt out with saline',
@@ -41,32 +44,25 @@ export function woundProcedure(e: Engine): Procedure {
       e.hooks.loop('water', false);
     },
     update() {
-      if (!e.ptr.down) return;
-      spray(e, e.ptr.x, e.ptr.y, 14);
-      e.stamp('wet', e.ptr.x, e.ptr.y, 50 * e.u, { alpha: 0.2 });
+      e.toolPose.lift = 0.02;
+      if (!e.ptr.down || !e.ptr.hit) return;
+      spray(e, e.ptr, 0.003);
+      e.stamp('wet', e.ptr.uv, 50 * e.u, { alpha: 0.2 });
       for (let i = specks.length - 1; i >= 0; i--) {
         const s = specks[i];
-        if (dist(s, e.ptr) > 45 * e.u) continue;
+        if (s.position.distanceTo(e.ptr.p) > 45 * e.u) continue;
         specks.splice(i, 1);
-        const from = { x: s.x, y: s.y };
-        e.tween(
-          0.6,
-          (k) => {
-            e.moveAttached(s, from.x, from.y + ease.out(k) * 90 * e.u);
-            s.alpha = 1 - k;
-          },
-          () => e.detach(s),
-        );
+        tweenTo(e, s, s.position.clone().addScaledVector(downhill(w.n), 0.02), 0.6, () => e.detach(s));
         e.work(2);
       }
     },
     progress: () => 1 - specks.length / specksTotal,
   };
 
-  // 2. Drain -------------------------------------------------------------------
+  // 2. Drain -----------------------------------------------------------------------
   let pus = 1;
   let ouchCd = 0;
-  let bead: Sprite | null = null;
+  let ooze: THREE.Mesh | null = null;
   let oozeT = 0;
   const drain: Step = {
     title: 'Drain',
@@ -74,17 +70,18 @@ export function woundProcedure(e: Engine): Procedure {
     cursor: 'gauze',
     update(dt) {
       ouchCd -= dt;
-      pocket.scale.set(((52 * e.u) / pocket.texture.width) * (0.35 + 0.65 * pus));
-      pocket.scale.y *= 0.8;
-      if (!e.ptr.down || pus <= 0) return;
-      const d = dist(e.ptr, w);
+      // The abscess bulges while it is full.
+      e.press(w.p, 45 * e.u, -0.0022 * pus);
+      setBeadSize(head, (0.0012 + 0.002 * pus));
+      if (!e.ptr.down || !e.ptr.hit || pus <= 0) return;
+      const d = e.ptr.p.distanceTo(w.p);
       if (d < R * 0.45) {
         if (ouchCd <= 0) {
           ouchCd = 0.9;
           penalty++;
-          e.kick(w.x, w.y, 200 * e.u, 1500 * e.u);
+          e.kick(w.p, 200 * e.u, 0.15);
           e.shake(10);
-          e.floatText(w.x, w.y - 90 * e.u, 'Ouch! Not on it', 0xff7b7b, 40);
+          e.floatText(w.p, 'Ouch! Not on it', '#ff7b7b', 22);
           e.hooks.sfx('ouch');
           e.hooks.haptic('error');
         }
@@ -92,21 +89,20 @@ export function woundProcedure(e: Engine): Procedure {
       }
       if (d > R * 2.4) return;
       // Pressing: dent under the finger, tissue pushed toward the wound.
-      e.pinch(e.ptr.x, e.ptr.y, 70 * e.u, 0.12);
-      e.force(e.ptr.x, e.ptr.y, 80 * e.u, ((w.x - e.ptr.x) / d) * 14 * e.u, ((w.y - e.ptr.y) / d) * 14 * e.u);
+      e.press(e.ptr.p, 70 * e.u, 0.0025);
+      e.force(e.ptr.p, 80 * e.u, w.p.clone().sub(e.ptr.p).normalize().multiplyScalar(0.0015));
       pus = Math.max(0, pus - dt * 0.22);
       e.work(dt * 10);
       oozeT += dt;
       if (oozeT > 0.12) {
         oozeT = 0;
         // Late in drainage it turns blood-tinged — that's when to stop.
-        const tint = pus < 0.25 ? 0xd98a74 : 0xe8cf6a;
-        const a = angle + Math.PI / 2 + rand(-0.6, 0.6);
-        const r = rand(0, 1) * (1 - pus) * 40 * e.u;
-        e.stamp('fluid', w.x + Math.cos(a) * r, w.y + Math.sin(a) * r, rand(10, 18) * e.u, { alpha: 0.55, tint });
-        if (!bead) bead = e.attach(e.sprite('pus', w.x, w.y, 10 * e.u), w.x, w.y);
-        bead.tint = pus < 0.25 ? 0xf0b0a0 : 0xffffff;
-        bead.scale.set(((10 + (1 - pus) * 26) * e.u) / bead.texture.width);
+        const a = rand(0, Math.PI * 2);
+        const r = rand(0, 1) * (1 - pus) * 0.006;
+        const at = w.p.clone().add(new THREE.Vector3(Math.cos(a) * r, Math.sin(a) * r, 0)).addScaledVector(downhill(w.n), (1 - pus) * 0.004);
+        e.stamp(pus < 0.25 ? 'blood' : 'pus', at, rand(10, 18) * e.u, { alpha: pus < 0.25 ? 0.25 : 0.55 });
+        if (!ooze) ooze = bead(e, w, e.M.pus, 0.001);
+        setBeadSize(ooze, (1 + (1 - pus) * 4) * 0.001);
         if (Math.random() < 0.25) {
           e.hooks.sfx('squish');
           e.hooks.haptic('tick');
@@ -116,26 +112,29 @@ export function woundProcedure(e: Engine): Procedure {
     progress: () => 1 - pus,
   };
 
-  // 3. Blot ---------------------------------------------------------------------
+  // 3. Blot ---------------------------------------------------------------------------
   const blot = rubStep(e, {
     title: 'Blot',
     hint: 'Blot away all the discharge',
     cursor: 'gauze',
-    layer: 'fluid',
+    layer: 'pus',
     mode: 'erase',
     radius: 45,
     alpha: 0.3,
     target: 0.03,
+    alsoErase: [['blood', 0.3]],
     region,
     onMove(p) {
-      if (bead && dist(p, w) < 50 * e.u) {
-        e.detach(bead);
-        bead = null;
+      e.press(p.p, 50 * e.u, 0.0008);
+      if (ooze && p.p.distanceTo(w.p) < 50 * e.u) {
+        e.detach(ooze);
+        ooze = null;
       }
+      if (head.visible && p.p.distanceTo(w.p) < 40 * e.u) head.visible = false;
     },
   });
 
-  // 4. Peroxide ----------------------------------------------------------------
+  // 4. Peroxide ---------------------------------------------------------------------
   let fizzT = 0;
   const peroxide: Step = {
     title: 'Peroxide',
@@ -148,17 +147,17 @@ export function woundProcedure(e: Engine): Procedure {
       e.hooks.loop('fizz', false);
     },
     update(dt) {
-      if (!e.ptr.down || dist(e.ptr, w) > R * 1.3) return;
+      e.toolPose.lift = 0.015;
+      if (!e.ptr.down || !e.ptr.hit || e.ptr.p.distanceTo(w.p) > R * 1.3) return;
       fizzT += dt;
       e.work(dt * 6);
-      fizz(e, w.x, w.y, 40 * e.u, Math.random() < 0.4 ? 0xffd9e0 : 0xffffff);
-      if (Math.random() < 0.5) e.stamp('foam', w.x + rand(-30, 30) * e.u, w.y + rand(-25, 25) * e.u, rand(14, 26) * e.u, { tex: 'foam', alpha: 0.7 });
+      fizz(e, w, 0.008, Math.random() < 0.4 ? 0xffd9e0 : 0xffffff);
+      if (Math.random() < 0.5) e.stamp('foam', w.p.clone().add(new THREE.Vector3(rand(-1, 1) * 0.006, rand(-1, 1) * 0.005, 0)), rand(14, 26) * e.u, { tex: 'foam', alpha: 0.7 });
       e.hooks.haptic('tick');
     },
     progress: () => clamp01(fizzT / 3),
   };
 
-  // 5. Blot foam ---------------------------------------------------------------
   const blotFoam = rubStep(e, {
     title: 'Dab',
     hint: 'Dab the foam dry',
@@ -171,7 +170,6 @@ export function woundProcedure(e: Engine): Procedure {
     region,
   });
 
-  // 6. Ointment ----------------------------------------------------------------
   const ointment = rubStep(e, {
     title: 'Ointment',
     hint: 'Antibiotic ointment over the wound',
@@ -181,20 +179,22 @@ export function woundProcedure(e: Engine): Procedure {
     radius: 40,
     alpha: 0.5,
     target: 0.8,
-    region: () => e.cellsInCircle(w.x, w.y, R * 1.2),
+    region: () => e.cellsInSphere(w.p, R * 1.2),
   });
 
-  // 7. Dress + 8. Heal ----------------------------------------------------------
-  const bandage = { s: null as Sprite | null };
+  const bandage = { o: null as THREE.Object3D | null };
   const dress = bandageStep(e, () => w, () => R * 0.9, bandage);
-  const cutScale = cut.scale.x;
+  const cutMesh = cut.children[0] as THREE.Mesh<THREE.BufferGeometry, THREE.MeshPhysicalMaterial>;
   const heal = healStep(e, 4, (k, dt) => {
     e.fadeLayer('redness', dt * 0.9);
     e.fadeLayer('gloss', dt * 0.5);
-    cut.scale.set(cutScale * (1 - 0.7 * k), cutScale * (1 - 0.85 * k));
-    cut.alpha = 1 - k;
-    pocket.alpha = Math.max(0, 0.95 - k * 3);
-    if (bandage.s && k > 0.55) bandage.s.alpha = clamp01((1 - k) / 0.45);
+    e.fadeLayer('pus', dt);
+    cutMesh.material.opacity = 1 - k;
+    if (bandage.o && k > 0.55)
+      bandage.o.traverse((x) => {
+        const m = (x as THREE.Mesh).material as THREE.Material | undefined;
+        if (m) m.opacity = clamp01((1 - k) / 0.45);
+      });
   });
 
   return {
@@ -203,11 +203,11 @@ export function woundProcedure(e: Engine): Procedure {
     accuracy: () => clamp01(1 - penalty * 0.15),
     dispose() {
       for (const s of specks) e.detach(s);
-      if (bead) e.detach(bead);
-      if (bandage.s) e.detach(bandage.s);
+      if (ooze) e.detach(ooze);
+      if (bandage.o) e.detach(bandage.o);
       e.detach(cut);
-      e.detach(pocket);
-      for (const id of ['fluid', 'foam', 'gloss', 'wet'] as const) e.clearLayer(id);
+      e.detach(head);
+      for (const id of ['blood', 'pus', 'foam', 'gloss', 'wet'] as const) e.clearLayer(id);
       e.fadeLayer('redness', 1);
     },
   };

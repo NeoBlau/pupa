@@ -13,15 +13,17 @@ export interface ModelDef {
   unlockCost: number;
   /** Income multiplier at level 1. */
   baseMult: number;
-  /** Room background: image (.jpg/.png/.webp/.svg) or looping video (.mp4/.webm). */
-  room: string;
   /**
-   * Optional mask with the same size as `room`: white where the feet are, transparent elsewhere.
-   * Oil, foam and ink stay inside it, and coverage % is counted only inside it.
+   * Optional 3D scan of this model's foot (.glb with textures), e.g. models/anna/foot.glb.
+   * Without it a procedural foot in the model's skin tone is used.
    */
-  mask?: string;
-  /** Acupuncture points in normalized room coords (0..1). Random points inside the mask if omitted. */
-  acupoints?: [number, number][];
+  scan?: string;
+  /** Euler rotation (radians) that turns the scan so toes point +Y and the sole faces +Z. */
+  scanRotation?: [number, number, number];
+  /** Skin tone of the procedural foot. */
+  skin: string;
+  /** Acupuncture points on the foot in metres (foot space). Random sole points if omitted. */
+  acupoints?: [number, number, number][];
   /** Photos shown in the model card carousel. */
   cover: string[];
   /** Bonus gallery; photo i opens at level galleryLevels[i]. */
@@ -29,26 +31,25 @@ export interface ModelDef {
   galleryLevels: number[];
 }
 
-const m = (id: string, name: string, unlockCost: number, baseMult: number): ModelDef => ({
+const m = (id: string, name: string, unlockCost: number, baseMult: number, skin: string): ModelDef => ({
   id,
   name,
   unlockCost,
   baseMult,
-  room: `models/${id}/room.svg`,
-  mask: `models/${id}/mask.svg`,
+  skin,
   cover: [`models/${id}/cover1.svg`, `models/${id}/cover2.svg`, `models/${id}/cover3.svg`],
   gallery: [`models/${id}/g1.svg`, `models/${id}/g2.svg`, `models/${id}/g3.svg`],
   galleryLevels: [2, 5, 10],
 });
 
-// Replace the .svg placeholders with your own files (see README).
+// Cover/gallery .svg files are placeholders: replace them with your photos (see README).
 export const MODELS: ModelDef[] = [
-  m('anna', 'Anna', 0, 1),
-  m('kate', 'Kate', 20_000, 1.5),
-  m('kim', 'Kim', 50_000, 2.2),
-  m('tiffany', 'Tiffany', 50_000, 2.2),
-  m('mia', 'Mia', 150_000, 3.5),
-  m('lola', 'Lola', 400_000, 5),
+  m('anna', 'Anna', 0, 1, '#f0c3a6'),
+  m('kate', 'Kate', 20_000, 1.5, '#f5cfb6'),
+  m('kim', 'Kim', 50_000, 2.2, '#eec7a1'),
+  m('tiffany', 'Tiffany', 50_000, 2.2, '#8e5a3b'),
+  m('mia', 'Mia', 150_000, 3.5, '#e5b691'),
+  m('lola', 'Lola', 400_000, 5, '#c88e6a'),
 ];
 
 export const MAX_LEVEL = 10;

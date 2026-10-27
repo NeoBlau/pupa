@@ -266,6 +266,11 @@ export function flushMap(asset: { toes: { b: THREE.Vector3; r: number }[] }) {
   const cv = document.createElement('canvas');
   cv.width = cv.height = N;
   const c = cv.getContext('2d')!;
+  // Opaque black base + additive grey: alpha-only blobs would come back un-premultiplied
+  // (full white wherever alpha > 0) and show hard edges.
+  c.fillStyle = '#000';
+  c.fillRect(0, 0, N, N);
+  c.globalCompositeOperation = 'lighter';
   const uv = (x: number, y: number): [number, number] => [((x + 0.13) / 0.26) * N, (1 - (y + 0.01) / 0.26) * N];
   const blob = (x: number, y: number, rx: number, ry: number, a: number) => {
     const [px, py] = uv(x, y);
@@ -273,19 +278,30 @@ export function flushMap(asset: { toes: { b: THREE.Vector3; r: number }[] }) {
     c.translate(px, py);
     c.scale((rx / 0.26) * N, (ry / 0.26) * N);
     const g = c.createRadialGradient(0, 0, 0, 0, 0, 1);
-    g.addColorStop(0, `rgba(255,255,255,${a})`);
-    g.addColorStop(1, 'rgba(255,255,255,0)');
+    // Gaussian-like falloff.
+    for (let i = 0; i <= 8; i++) {
+      const t = i / 8;
+      const v = Math.round(255 * a * Math.exp(-t * t * 1.6) * (1 - t * t * t));
+      g.addColorStop(t, `rgb(${v},${v},${v})`);
+    }
     c.fillStyle = g;
     c.beginPath();
     c.arc(0, 0, 1, 0, Math.PI * 2);
     c.fill();
     c.restore();
   };
-  blob(0.012, 0.03, 0.026, 0.03, 0.9);
-  blob(0.008, 0.165, 0.045, 0.024, 0.95);
-  blob(0.045, 0.11, 0.012, 0.05, 0.5);
-  for (const t of asset.toes) blob(t.b.x, t.b.y, t.r * 1.2, t.r * 1.2, 1);
-  return new THREE.CanvasTexture(cv);
+  blob(0.012, 0.035, 0.034, 0.04, 0.85); // heel pad
+  blob(0.008, 0.165, 0.055, 0.032, 0.8); // ball
+  blob(-0.012, 0.165, 0.03, 0.026, 0.35); // under the big toe joint
+  blob(0.046, 0.11, 0.016, 0.06, 0.45); // lateral edge
+  for (const t of asset.toes) blob(t.b.x, t.b.y, t.r * 1.5, t.r * 1.6, 0.9);
+  // Soften once more so nothing reads as a shape.
+  const out = document.createElement('canvas');
+  out.width = out.height = N;
+  const o = out.getContext('2d')!;
+  o.filter = 'blur(6px)';
+  o.drawImage(cv, 0, 0);
+  return new THREE.CanvasTexture(out);
 }
 
 export function patchSkinMaterial(
@@ -323,8 +339,10 @@ export function patchSkinMaterial(
         top = mix(top, top * vec3(0.82, 0.86, 1.0), texture2D(uVeins, vPaintUv).r * 0.35); // faint bluish veins
         vec3 col = mix(top, diffuseColor.rgb, smoothstep(0.0, 1.0, vPaintMask));
         // Flush: pressure areas turn pink-red (stronger on the sole), the rest warms slightly.
-        float fl = uFlush * (0.18 + 0.82 * texture2D(uFlushMap, vPaintUv).r * vPaintMask);
-        col = mix(col, col * vec3(1.02, 0.58, 0.62) + vec3(0.06, 0.0, 0.012), fl * 0.7); // rosy, not orange
+        // Blotchy, like real capillary flush: modulate by low-frequency skin mottling.
+        float blot = 0.75 + 0.5 * texture2D(uDetail, vPaintUv * 1.3).b;
+        float fl = uFlush * (0.15 + 0.85 * texture2D(uFlushMap, vPaintUv).r * vPaintMask * blot);
+        col = mix(col, col * vec3(1.02, 0.56, 0.6) + vec3(0.07, 0.0, 0.014), min(1.0, fl * 0.95)); // rosy, not orange
         col = mix(col, col * vec3(1.0, 0.5, 0.45) + vec3(0.1, 0.0, 0.0), P0.r * 0.8);   // redness
         col = mix(col, col * vec3(0.22, 0.2, 0.26), P0.b * 0.85);                        // shading
         col = mix(col, vec3(0.025, 0.02, 0.04), P0.g * 0.96);                            // ink
@@ -334,8 +352,8 @@ export function patchSkinMaterial(
         // Blood: a thin film stains the skin (multiplied), a thick layer is opaque deep red,
         // and the edge of a run is darker where it is drying (coffee-ring).
         float bl = P1.g;
-        col = mix(col, col * vec3(0.8, 0.12, 0.11), smoothstep(0.0, 0.4, bl));
-        col = mix(col, vec3(0.3, 0.012, 0.02), smoothstep(0.3, 0.95, bl));
+        col = mix(col, col * vec3(0.6, 0.055, 0.05), smoothstep(0.0, 0.4, bl));
+        col = mix(col, vec3(0.12, 0.004, 0.006), smoothstep(0.3, 0.95, bl));
         col *= 1.0 - 0.35 * smoothstep(0.08, 0.3, bl) * (1.0 - smoothstep(0.3, 0.65, bl));
         col = mix(col, vec3(0.85, 0.72, 0.34), P1.b);                                    // pus
         col = mix(col, vec3(0.95, 0.95, 0.98), P1.a * 0.85);                             // laser frost
@@ -360,7 +378,7 @@ export function patchSkinMaterial(
         float hC = lb.x + 0.6 * lb.y;
         vec2 lx = texture2D(uPaint1, vPaintUv + tx).gb, ly = texture2D(uPaint1, vPaintUv + ty).gb;
         vec2 grad = vec2(lx.x + 0.6 * lx.y - hC, ly.x + 0.6 * ly.y - hC) * vPaintMask;
-        normal = normalize(normal - tbn * vec3(grad * 2.2, 0.0));`,
+        normal = normalize(normal - tbn * vec3(grad * 7.0, 0.0));`,
       )
       .replace(
         '#include <roughnessmap_fragment>',

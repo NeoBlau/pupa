@@ -300,8 +300,8 @@ export class World {
       w.spotT = (w.spotT ?? 0) + dt;
       if (w.pool > 0.08 && w.spotT > 0.2) {
         w.spotT = 0;
-        const rr = (5 + 10 * Math.min(1, w.pool)) * e.u * (w.kind === 'pinpoint' ? 0.4 : 1);
-        e.stamp('blood', w.s.p.clone().addScaledVector(downhill(w.s.n), rr * 0.4), rr, { alpha: 0.2 });
+        const rr = (9 + 16 * Math.min(1, w.pool)) * e.u * (w.kind === 'pinpoint' ? 0.4 : 1);
+        e.stamp('blood', w.s.p.clone().addScaledVector(downhill(w.s.n), rr * 0.4).add(new THREE.Vector3(rand(-1, 1), rand(-1, 1), 0).multiplyScalar(rr * 0.35)), rr * rand(0.7, 1), { alpha: 0.2 }); // irregular edge
       }
       if (w.pool > 0.6 && !w.covered) {
         let t = w.trickles[w.trickles.length - 1];

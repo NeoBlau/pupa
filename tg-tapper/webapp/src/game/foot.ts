@@ -523,6 +523,37 @@ export function skinDetailMap(renderer: THREE.WebGLRenderer) {
   return t;
 }
 
+/** Faint dorsal veins (dorsal venous arch fanning to the toes), in the foot's planar UV. */
+export function veinMap() {
+  const N = 1024;
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = N;
+  const c = cv.getContext('2d')!;
+  const uv = (x: number, y: number): [number, number] => [((x + 0.13) / 0.26) * N, (1 - (y + 0.01) / 0.26) * N];
+  c.lineCap = 'round';
+  c.filter = 'blur(3px)';
+  const vein = (pts: [number, number][], w: number, a: number) => {
+    c.strokeStyle = `rgba(255,255,255,${a})`;
+    c.lineWidth = w;
+    c.beginPath();
+    pts.forEach(([x, y], i) => {
+      const [px, py] = uv(x + (Math.random() - 0.5) * 0.001, y);
+      if (i) c.lineTo(px, py);
+      else c.moveTo(px, py);
+    });
+    c.stroke();
+  };
+  // arch across the instep, then branches toward each toe gap
+  const arch: [number, number][] = [[-0.022, 0.07], [-0.012, 0.11], [0.005, 0.135], [0.025, 0.13], [0.04, 0.1], [0.045, 0.07]];
+  vein(arch, 7, 0.75);
+  for (const [x0, y0, x1] of [[-0.012, 0.11, -0.012], [0.0, 0.13, -0.002], [0.012, 0.135, 0.012], [0.025, 0.13, 0.025], [0.036, 0.115, 0.036]] as const)
+    vein([[x0, y0], [(x0 + x1) / 2 + 0.002, y0 + 0.02], [x1, 0.175]], 4, 0.55);
+  vein([[-0.022, 0.07], [-0.02, 0.04], [-0.015, 0.0]], 6, 0.6);
+  vein([[0.045, 0.07], [0.04, 0.04], [0.035, 0.0]], 5, 0.5);
+  const t = new THREE.CanvasTexture(cv);
+  return t;
+}
+
 /** Height map → tangent-space normal map, computed on the GPU at full resolution. */
 function gpuNormalMap(renderer: THREE.WebGLRenderer, height: HTMLCanvasElement, strength: number) {
   const src = new THREE.CanvasTexture(height);

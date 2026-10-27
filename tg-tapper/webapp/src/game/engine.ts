@@ -5,7 +5,7 @@ import { DecalGeometry } from 'three/examples/jsm/geometries/DecalGeometry.js';
 import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree, type MeshBVH } from 'three-mesh-bvh';
 import type { ModelDef, ToolId } from '@shared/game.ts';
 import { createTextures, type TexName, type Textures } from './textures.ts';
-import { loadMeshFoot, loadScan, proceduralFoot, skinDetailMap, type FootAsset } from './foot.ts';
+import { loadMeshFoot, loadScan, proceduralFoot, skinDetailMap, veinMap, type FootAsset } from './foot.ts';
 import { Paint, patchSkinMaterial, type LayerId, type StampOpts } from './paint.ts';
 import { loadMaterials, type Materials } from './materials.ts';
 import { createTool, type ToolName } from './tools3d.ts';
@@ -370,7 +370,8 @@ export class Engine {
     });
     // Top of the foot is paler and pinker than the sole.
     this.detailMap ??= skinDetailMap(this.renderer);
-    patchSkinMaterial(mat, this.paint, new THREE.Color(def.skin).lerp(new THREE.Color('#f1d3cb'), 0.75).convertSRGBToLinear(), this.detailMap);
+    this.veins ??= veinMap();
+    patchSkinMaterial(mat, this.paint, new THREE.Color(def.skin).lerp(new THREE.Color('#f1d3cb'), 0.75).convertSRGBToLinear(), this.detailMap, this.veins);
     this.foot = new THREE.Mesh(g, mat);
     this.foot.castShadow = true;
     this.foot.receiveShadow = true;
@@ -565,6 +566,7 @@ export class Engine {
 
   private extraRest: { o: THREE.Object3D; p: THREE.Vector3; vi: number }[] = [];
   private detailMap: THREE.Texture | null = null;
+  private veins: THREE.Texture | null = null;
 
   private hashKey(x: number, y: number, z: number) {
     const c = 0.008;

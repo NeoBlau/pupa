@@ -260,18 +260,19 @@ export class Paint {
 }
 
 /** Patches the skin material so paint layers change colour, gloss and wetness. */
-export function patchSkinMaterial(mat: THREE.MeshPhysicalMaterial, paint: Paint, skin: THREE.Color, detail: THREE.Texture) {
+export function patchSkinMaterial(mat: THREE.MeshPhysicalMaterial, paint: Paint, skin: THREE.Color, detail: THREE.Texture, veins: THREE.Texture) {
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.uPaint0 = { value: paint.rts[0].texture };
     sh.uniforms.uPaint1 = { value: paint.rts[1].texture };
     sh.uniforms.uPaint2 = { value: paint.rts[2].texture };
     sh.uniforms.uSkin = { value: skin };
     sh.uniforms.uDetail = { value: detail };
+    sh.uniforms.uVeins = { value: veins };
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nattribute float paintMask;\nvarying float vPaintMask;\nvarying vec2 vPaintUv;')
       .replace('#include <uv_vertex>', '#include <uv_vertex>\nvPaintUv = uv;\nvPaintMask = paintMask;');
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform sampler2D uPaint0, uPaint1, uPaint2, uDetail;\nuniform vec3 uSkin;\nvarying float vPaintMask;\nvarying vec2 vPaintUv;')
+      .replace('#include <common>', '#include <common>\nuniform sampler2D uPaint0, uPaint1, uPaint2, uDetail, uVeins;\nuniform vec3 uSkin;\nvarying float vPaintMask;\nvarying vec2 vPaintUv;')
       .replace(
         '#include <map_fragment>',
         /* glsl */ `#include <map_fragment>
@@ -280,7 +281,9 @@ export function patchSkinMaterial(mat: THREE.MeshPhysicalMaterial, paint: Paint,
         vec4 P2 = clamp(texture2D(uPaint2, vPaintUv), 0.0, 1.0) * vPaintMask;
         // The photo texture belongs to the sole only; the instep gets the plain skin tone.
         float mott = texture2D(uDetail, vPaintUv * 2.3).b;
-        vec3 col = mix(uSkin * (0.93 + 0.14 * mott), diffuseColor.rgb, smoothstep(0.0, 1.0, vPaintMask));
+        vec3 top = uSkin * (0.93 + 0.14 * mott);
+        top = mix(top, top * vec3(0.82, 0.86, 1.0), texture2D(uVeins, vPaintUv).r * 0.35); // faint bluish veins
+        vec3 col = mix(top, diffuseColor.rgb, smoothstep(0.0, 1.0, vPaintMask));
         col = mix(col, col * vec3(1.0, 0.5, 0.45) + vec3(0.1, 0.0, 0.0), P0.r * 0.8);   // redness
         col = mix(col, col * vec3(0.22, 0.2, 0.26), P0.b * 0.85);                        // shading
         col = mix(col, vec3(0.025, 0.02, 0.04), P0.g * 0.96);                            // ink

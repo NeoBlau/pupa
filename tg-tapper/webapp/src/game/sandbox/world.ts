@@ -257,6 +257,7 @@ export class World {
     if (this.redFadeT > 0.5) {
       e.fadeLayer('redness', this.redFadeT * 0.006);
       e.fadeLayer('wet', this.redFadeT * 0.004);
+      e.fadeLayer('foam', this.redFadeT * 0.02); // peroxide foam settles within ~30 s
       this.redFadeT = 0;
     }
 
@@ -367,6 +368,7 @@ export class World {
     const wet = Math.max(e.amountAt('wet', p.uv), e.amountAt('foam', p.uv));
     e.stamp('blood', p.uv, r, { erase: true, alpha: (0.07 + 0.5 * wet) * (0.4 + force) });
     e.stamp('pus', p.uv, r, { erase: true, alpha: 0.25 * (0.4 + force) });
+    e.stamp('foam', p.uv, r, { erase: true, alpha: 0.4 * (0.4 + force) });
     for (const w of this.wounds) {
       if (w.pool > 0 && w.s.p.distanceTo(p.p) < r + w.size) {
         w.pool = Math.max(0, w.pool - delta.length() / (160 * e.u));

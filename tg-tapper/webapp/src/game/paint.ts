@@ -324,7 +324,7 @@ export function patchSkinMaterial(
         vec3 col = mix(top, diffuseColor.rgb, smoothstep(0.0, 1.0, vPaintMask));
         // Flush: pressure areas turn pink-red (stronger on the sole), the rest warms slightly.
         float fl = uFlush * (0.18 + 0.82 * texture2D(uFlushMap, vPaintUv).r * vPaintMask);
-        col = mix(col, col * vec3(1.06, 0.6, 0.56) + vec3(0.05, 0.0, 0.0), fl * 0.75);
+        col = mix(col, col * vec3(1.02, 0.58, 0.62) + vec3(0.06, 0.0, 0.012), fl * 0.7); // rosy, not orange
         col = mix(col, col * vec3(1.0, 0.5, 0.45) + vec3(0.1, 0.0, 0.0), P0.r * 0.8);   // redness
         col = mix(col, col * vec3(0.22, 0.2, 0.26), P0.b * 0.85);                        // shading
         col = mix(col, vec3(0.025, 0.02, 0.04), P0.g * 0.96);                            // ink

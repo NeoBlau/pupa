@@ -300,8 +300,8 @@ export class World {
       w.spotT = (w.spotT ?? 0) + dt;
       if (w.pool > 0.08 && w.spotT > 0.2) {
         w.spotT = 0;
-        const rr = (2.5 + 5 * Math.min(1, w.pool)) * e.u * (w.kind === 'pinpoint' ? 0.5 : 1);
-        e.stamp('blood', w.s.p.clone().addScaledVector(downhill(w.s.n), rr * 0.4), rr, { alpha: 0.12 });
+        const rr = (5 + 10 * Math.min(1, w.pool)) * e.u * (w.kind === 'pinpoint' ? 0.4 : 1);
+        e.stamp('blood', w.s.p.clone().addScaledVector(downhill(w.s.n), rr * 0.4), rr, { alpha: 0.2 });
       }
       if (w.pool > 0.6 && !w.covered) {
         let t = w.trickles[w.trickles.length - 1];
@@ -325,7 +325,7 @@ export class World {
         if (s) {
           t.dir.lerp(downhill(s.n), 0.25).normalize(); // keeps some momentum, mostly downhill
           // Thick at the source, thinning as it runs.
-          const width = (4.2 - Math.min(1.8, t.path.length * 0.03)) * e.u;
+          const width = (6.5 - Math.min(3, t.path.length * 0.04)) * e.u * (0.7 + 0.3 * Math.min(1, w.pool));
           e.paintLine('blood', last, s.p, width, { alpha: 0.7 }, 0.25);
           t.path.push(s.p);
           e.moveAttached(t.tip, s.p);

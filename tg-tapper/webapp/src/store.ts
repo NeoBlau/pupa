@@ -146,11 +146,11 @@ class Store {
     return m;
   }
 
-  work(units: number, tool: ToolId) {
+  work(units: number, kind: 'spa' | 'clinic') {
     const now = this.now();
     const coins = units * unitValue(this.state, this.stage, now);
     this.addCoins(coins, units, 0);
-    if (toolById(tool).kind === 'spa') {
+    if (kind === 'spa') {
       this.meter += units * METER.perUnit * this.meterMult();
       this.lastWorkAt = now;
       if (this.meter >= 100) {

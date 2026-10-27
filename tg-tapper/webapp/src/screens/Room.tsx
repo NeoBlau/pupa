@@ -9,11 +9,13 @@ import {
   isToolUnlocked,
   modelById,
   nextLockedModel,
+  toolById,
   type ItemId,
-  type ToolDef,
+  type ToolId,
 } from '@shared/game.ts';
-import { Engine, type StepView } from '../game/engine.ts';
-import { createProcedure, restoreTattoo } from '../game/procedures/index.ts';
+import { Engine } from '../game/engine.ts';
+import { restoreTattoo } from '../game/procedures/index.ts';
+import { ORDERS, SANDBOX_TOOLS, Sandbox, type SandboxView } from '../game/sandbox/index.ts';
 import { fmt, store, useStore } from '../store.ts';
 import { haptic } from '../tg.ts';
 import { loop, sfx } from '../sound.ts';
@@ -22,30 +24,54 @@ export function Room({ active }: { active: boolean }) {
   const s = useStore();
   const host = useRef<HTMLDivElement>(null);
   const overlay = useRef<HTMLDivElement>(null);
-  const [loadPct, setLoadPct] = useState(0);
   const engine = useRef<Engine | null>(null);
-  const [view, setView] = useState<StepView | null>(null);
+  const sandbox = useRef<Sandbox | null>(null);
+  const [loadPct, setLoadPct] = useState(0);
+  const [view, setView] = useState<SandboxView | null>(null);
   const [mode, setMode] = useState<'spa' | 'clinic'>('spa');
   const [help, setHelp] = useState(false);
+  const [orders, setOrders] = useState(false);
+  const [pad, setPad] = useState(false);
+  const [force, setForce] = useState(0.55);
   const [loaded, setLoaded] = useState('');
   const model = modelById(s.state.selected)!;
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
+
+  const tools = SANDBOX_TOOLS.filter((t) => t.group === mode || t.group === 'both');
+  const toolsRef = useRef(tools);
+  toolsRef.current = tools;
 
   // Create the 3D engine once.
   useEffect(() => {
     const e = new Engine({
-      onWork: (u) => {
-        const id = e.procedure?.id;
-        if (id) store.work(u, id);
-      },
-      onFinish: (tool, acc) => store.finish(tool, acc),
-      onStep: setView,
+      onWork: (u) => store.work(u, sandbox.current?.tool.group === 'clinic' ? 'clinic' : modeRef.current),
+      onFinish: () => {},
+      onStep: () => {},
+      onLoad: (k) => setLoadPct(Math.round(k * 100)),
       sfx: (n) => store.soundOn && sfx(n),
       loop: (n, on) => (store.soundOn || !on) && loop(n, on),
       haptic,
-      onLoad: (k) => setLoadPct(Math.round(k * 100)),
+      onPadState: setPad,
+      onPadTool: (dir) => {
+        const sb = sandbox.current;
+        if (!sb) return;
+        const list = toolsRef.current;
+        const i = list.findIndex((t) => t.id === sb.tool.id);
+        sb.setTool(list[(i + dir + list.length) % list.length].id);
+        haptic('light');
+      },
+      onPadSub: () => {
+        const sb = sandbox.current;
+        const sub = sb?.tool.sub;
+        if (!sb || !sub) return;
+        const i = sub.findIndex((x) => x.id === sb.tool.subId);
+        sb.setSub(sub[(i + 1) % sub.length].id);
+      },
     });
     engine.current = e;
-    if (location.search.includes('debug')) (window as unknown as { __engine: Engine }).__engine = e;
+    if (location.search.includes('debug')) (window as unknown as { __engine: Engine; __sandbox: () => Sandbox | null }).__engine = e;
+    (window as unknown as { __sandbox: () => Sandbox | null }).__sandbox = () => sandbox.current;
     let alive = true;
     void e.init(host.current!, overlay.current!).then(() => {
       if (!alive) e.destroy();
@@ -56,7 +82,7 @@ export function Room({ active }: { active: boolean }) {
     };
   }, []);
 
-  // (Re)load the room whenever the selected model changes.
+  // (Re)load the foot whenever the selected model changes; start free play.
   useEffect(() => {
     const e = engine.current;
     if (!e) return;
@@ -69,6 +95,10 @@ export function Room({ active }: { active: boolean }) {
       await e.loadModel(model);
       const t = store.getTattoo(model.id);
       if (t) restoreTattoo(e, t);
+      const sb = new Sandbox(e, { getTattoo: () => store.getTattoo(model.id), saveTattoo: (x) => store.saveTattoo(model.id, x) });
+      sb.onView = setView;
+      sb.onOrderDone = (o, score) => store.finish(o.id, score);
+      sandbox.current = sb;
       setLoaded(model.id);
     };
     void go();
@@ -77,14 +107,23 @@ export function Room({ active }: { active: boolean }) {
     };
   }, [model.id]);
 
-  // Pause rendering while another tab is open.
   useEffect(() => {
     const e = engine.current;
     if (!e?.ready) return;
     e.setRunning(active);
   }, [active, loaded]);
 
-  // Meter decay.
+  useEffect(() => {
+    if (engine.current) engine.current.sliderForce = force;
+  }, [force]);
+
+  // Switching mode picks a tool that exists in the new toolbar.
+  useEffect(() => {
+    const sb = sandbox.current;
+    if (sb && !tools.some((t) => t.id === sb.tool.id)) sb.setTool('hand');
+  }, [mode, loaded]);
+
+  // Mood meter decay.
   useEffect(() => {
     let raf = 0;
     let last = performance.now();
@@ -97,35 +136,19 @@ export function Room({ active }: { active: boolean }) {
     return () => cancelAnimationFrame(raf);
   }, []);
 
-  const start = (tool: ToolDef) => {
-    const e = engine.current;
-    if (!e || loaded !== model.id) return;
-    if (!isToolUnlocked(s.state, tool.id)) {
-      s.toast(`${tool.name} opens at ${model.name} Lvl ${tool.level}`, 'info');
-      return;
-    }
-    if (tool.id === 'removal' && !s.getTattoo(model.id)) {
-      s.toast('No tattoo to remove yet — make one first', 'info');
-      return;
-    }
-    if (tool.id === 'tattoo' && s.getTattoo(model.id)) {
-      s.toast('She already has a tattoo — remove it first', 'info');
-      return;
-    }
-    haptic('light');
-    e.setProcedure(
-      createProcedure(tool.id, e, {
-        model,
-        getTattoo: () => store.getTattoo(model.id),
-        saveTattoo: (t) => store.saveTattoo(model.id, t),
-      }),
-    );
-  };
-
-  const stop = () => engine.current?.setProcedure(null);
-  const tools = TOOLS.filter((t) => t.kind === mode);
-  const running = view && !view.finished;
+  const sb = sandbox.current;
+  const tool = sb?.tool;
+  const order = view?.order ? ORDERS.find((o) => o.id === view.order) : null;
   const next = nextLockedModel(s.state);
+
+  const startOrder = (id: ToolId) => {
+    const def = toolById(id);
+    if (!isToolUnlocked(s.state, id)) return s.toast(`${def.name} opens at ${model.name} Lvl ${def.level}`, 'info');
+    if (id === 'removal' && !s.getTattoo(model.id)) return s.toast('No tattoo to remove yet — do a tattoo order first', 'info');
+    setOrders(false);
+    sb?.startOrder(id);
+    haptic('light');
+  };
 
   return (
     <div className={`room ${active ? '' : 'hidden'}`}>
@@ -149,14 +172,7 @@ export function Room({ active }: { active: boolean }) {
         </div>
         <div className="mode-switch">
           {(['spa', 'clinic'] as const).map((m) => (
-            <button
-              key={m}
-              className={mode === m ? 'on' : ''}
-              onClick={() => {
-                if (running) stop();
-                setMode(m);
-              }}
-            >
+            <button key={m} className={mode === m ? 'on' : ''} onClick={() => setMode(m)}>
               {m === 'spa' ? '💆 SPA' : '🩺 Clinic'}
             </button>
           ))}
@@ -164,39 +180,40 @@ export function Room({ active }: { active: boolean }) {
         <div className="coins-pill">🪙 {fmt(s.state.coins)}</div>
       </div>
 
-      {mode === 'spa' ? <MoodMeter /> : <HealingBar view={view} />}
+      {mode === 'spa' ? <MoodMeter /> : null}
 
-      {running && view && (
-        <div className="step-panel">
-          <div className="step-head">
-            <span>
-              {view.index + 1}/{view.steps.length} · <b>{view.title}</b>
-            </span>
-            <button className="x" onClick={stop} aria-label="Stop">
-              ✕
-            </button>
-          </div>
-          <div className="step-hint">{view.hint}</div>
-          <div className="bar">
-            <i style={{ width: `${view.progress * 100}%` }} />
-          </div>
-          <div className="step-dots">
-            {view.steps.map((t, i) => (
-              <span key={i} className={i < view.index ? 'done' : i === view.index ? 'cur' : ''} title={t} />
-            ))}
-          </div>
-          {view.tools && (
-            <div className="subtools">
-              {view.tools.map((t) => (
-                <button key={t.id} className={view.tool === t.id ? 'on' : ''} onClick={() => engine.current?.selectTool(t.id)}>
-                  <span>{t.icon}</span>
-                  {t.label}
-                </button>
-              ))}
+      {/* Order checklist (or the button to pick one) */}
+      <div className={`order-panel ${mode === 'clinic' ? 'clinic' : ''}`}>
+        {order ? (
+          <>
+            <div className="step-head">
+              <span>
+                {order.icon} <b>{order.title}</b>
+              </span>
+              <button className="x" onClick={() => sb?.reset()} aria-label="End order">
+                ✕
+              </button>
             </div>
-          )}
-        </div>
-      )}
+            <ul className="goals">
+              {view!.goals.map((g) => (
+                <li key={g.label} className={g.done ? 'done' : ''}>
+                  <span>{g.done ? '✓' : '○'}</span>
+                  {g.label}
+                </li>
+              ))}
+            </ul>
+            {view!.complete && (
+              <button className="btn wide" onClick={() => setOrders(true)}>
+                Done! Next patient →
+              </button>
+            )}
+          </>
+        ) : (
+          <button className="btn ghost" onClick={() => setOrders(true)}>
+            📋 Orders · free play
+          </button>
+        )}
+      </div>
 
       <div className="side-left">
         {ITEM_IDS.map((id) => (
@@ -213,29 +230,81 @@ export function Room({ active }: { active: boolean }) {
         </button>
       </div>
 
-      {!running && (
-        <div className="tool-tray">
-          {next && (
-            <div className="next-model">
-              <span>
-                {fmt(s.state.coins)} / {fmt(next.unlockCost)} → <b>{next.name}</b> 🔒
-              </span>
-              <div className="bar small">
-                <i style={{ width: `${Math.min(100, (s.state.coins / next.unlockCost) * 100)}%` }} />
-              </div>
+      {/* Pressure: gamepad trigger, pressure screen, or this slider */}
+      <div className="force">
+        {pad ? (
+          <span className="pad-tag">🎮 RT = force</span>
+        ) : (
+          <>
+            <input type="range" min={0.05} max={1} step={0.01} value={force} onChange={(ev) => setForce(Number(ev.target.value))} aria-label="Force" />
+            <span>{force < 0.35 ? 'light' : force < 0.75 ? 'firm' : 'hard'}</span>
+          </>
+        )}
+      </div>
+
+      <div className="tool-tray">
+        {tool?.sub && (
+          <div className="subtools floating">
+            {tool.sub.map((t) => (
+              <button key={t.id} className={tool.subId === t.id ? 'on' : ''} onClick={() => sb?.setSub(t.id)}>
+                <span>{t.icon}</span>
+                {t.label}
+              </button>
+            ))}
+          </div>
+        )}
+        {tool && <div className="tool-hint">{tool.hint}</div>}
+        {next && !order && (
+          <div className="next-model">
+            <span>
+              {fmt(s.state.coins)} / {fmt(next.unlockCost)} → <b>{next.name}</b> 🔒
+            </span>
+            <div className="bar small">
+              <i style={{ width: `${Math.min(100, (s.state.coins / next.unlockCost) * 100)}%` }} />
             </div>
-          )}
-          <div className="tools">
-            {tools.map((t) => {
-              const locked = !isToolUnlocked(s.state, t.id);
-              return (
-                <button key={t.id} className={`tool ${locked ? 'locked' : ''}`} onClick={() => start(t)}>
-                  <span className="ic">{t.icon}</span>
-                  <span className="nm">{t.name}</span>
-                  {locked && <span className="lv">Lvl {t.level}</span>}
-                </button>
-              );
-            })}
+          </div>
+        )}
+        <div className="tools">
+          {tools.map((t) => (
+            <button
+              key={t.id}
+              className={`tool ${tool?.id === t.id ? 'on' : ''}`}
+              onClick={() => {
+                sb?.setTool(t.id);
+                haptic('light');
+              }}
+            >
+              <span className="ic">{t.icon}</span>
+              <span className="nm">{t.name}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {orders && (
+        <div className="sheet-bg" onClick={() => setOrders(false)}>
+          <div className="sheet" onClick={(ev) => ev.stopPropagation()}>
+            <h3>Patients</h3>
+            <p className="muted">Pick an order for a checklist and a bonus — or just play freely. Every tool is always available.</p>
+            <div className="order-list">
+              {ORDERS.filter((o) => o.kind === mode).map((o) => {
+                const def = TOOLS.find((t) => t.id === o.id)!;
+                const locked = !isToolUnlocked(s.state, o.id);
+                return (
+                  <button key={o.id} className={`order-card ${locked ? 'locked' : ''}`} onClick={() => startOrder(o.id)}>
+                    <span className="ic">{o.icon}</span>
+                    <span className="tx">
+                      <b>{o.title}</b>
+                      <small>{o.brief}</small>
+                    </span>
+                    <span className="gold">{locked ? `Lvl ${def.level}` : `+${fmt(def.bonus)}`}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <button className="btn ghost wide" onClick={() => { sb?.reset(); setOrders(false); }}>
+              New patient · free play
+            </button>
           </div>
         </div>
       )}
@@ -286,24 +355,6 @@ function MoodMeter() {
   );
 }
 
-function HealingBar({ view }: { view: StepView | null }) {
-  const p = view ? (view.finished ? 1 : (view.index + view.progress) / view.steps.length) : 0;
-  return (
-    <div className="meter-wrap">
-      <div className="meter healing">
-        <div className="meter-fill" style={{ width: `${p * 100}%` }} />
-        <div className="meter-icons">
-          <span className={p > 0 ? 'lit' : ''}>🩸</span>
-          <span className={p > 0.33 ? 'lit' : ''}>🧴</span>
-          <span className={p > 0.66 ? 'lit' : ''}>🩹</span>
-          <span className={p >= 1 ? 'lit' : ''}>✨</span>
-        </div>
-      </div>
-      <div className="meter-label">{view ? (view.finished ? 'HEALED' : 'HEALING') : 'CLINIC'}</div>
-    </div>
-  );
-}
-
 function BoostButton({ id }: { id: ItemId }) {
   const s = useStore();
   const def = ITEMS[id];
@@ -330,18 +381,17 @@ function Help({ mode, onClose }: { mode: 'spa' | 'clinic'; onClose: () => void }
     <div className="sheet-bg" onClick={onClose}>
       <div className="sheet" onClick={(e) => e.stopPropagation()}>
         <h3>How to play</h3>
-        {mode === 'spa' ? (
-          <>
-            <p>Pick a procedure and follow the steps at the top. Spa work fills her mood meter — every stage multiplies your coins, and reaching the top pays a big bonus.</p>
-            <p className="muted">One finger / left mouse — use the tool. Two fingers / right mouse — rotate and zoom the camera.</p>
-          </>
-        ) : (
-          <>
-            <p>Clinic procedures follow real-world order: clean → treat → aftercare → dressing. Precision and gentle handling raise your bonus (up to x2).</p>
-            <p className="disclaimer">
-              ⚠️ This is a game, not medical advice. Infected wounds and abscesses must be treated by a doctor; tattooing and laser removal are done only by licensed specialists.
-            </p>
-          </>
+        <p>Everything is in your hands: pick any tool, any time. The skin reacts — blood runs until you stop it, oil and foam stay until rinsed, wounds heal only when clean and dressed.</p>
+        <p className="muted">
+          Touch / mouse: one finger uses the tool, two fingers (right mouse) turn the camera. The <b>Force</b> slider sets how hard you press; pressure screens and pens use real pressure.
+        </p>
+        <p className="muted">
+          🎮 Gamepad: left stick — tool · <b>RT — press (analog force)</b> · right stick — camera · LT / D-pad — zoom · LB/RB — tool · X — variant · B — reset view. Vibration follows the skin.
+        </p>
+        {mode === 'clinic' && (
+          <p className="disclaimer">
+            ⚠️ A game, not medical advice. Infected wounds and abscesses are treated by a doctor; tattooing and laser removal only by licensed specialists.
+          </p>
         )}
         <button className="btn" onClick={onClose}>
           Got it

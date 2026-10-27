@@ -260,7 +260,43 @@ export class Paint {
 }
 
 /** Patches the skin material so paint layers change colour, gloss and wetness. */
-export function patchSkinMaterial(mat: THREE.MeshPhysicalMaterial, paint: Paint, skin: THREE.Color, detail: THREE.Texture, veins: THREE.Texture) {
+/** Where the sole flushes pink: heel, ball, toe pads, outer edge (like the reference photo). */
+export function flushMap(asset: { toes: { b: THREE.Vector3; r: number }[] }) {
+  const N = 512;
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = N;
+  const c = cv.getContext('2d')!;
+  const uv = (x: number, y: number): [number, number] => [((x + 0.13) / 0.26) * N, (1 - (y + 0.01) / 0.26) * N];
+  const blob = (x: number, y: number, rx: number, ry: number, a: number) => {
+    const [px, py] = uv(x, y);
+    c.save();
+    c.translate(px, py);
+    c.scale((rx / 0.26) * N, (ry / 0.26) * N);
+    const g = c.createRadialGradient(0, 0, 0, 0, 0, 1);
+    g.addColorStop(0, `rgba(255,255,255,${a})`);
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    c.fillStyle = g;
+    c.beginPath();
+    c.arc(0, 0, 1, 0, Math.PI * 2);
+    c.fill();
+    c.restore();
+  };
+  blob(0.012, 0.03, 0.026, 0.03, 0.9);
+  blob(0.008, 0.165, 0.045, 0.024, 0.95);
+  blob(0.045, 0.11, 0.012, 0.05, 0.5);
+  for (const t of asset.toes) blob(t.b.x, t.b.y, t.r * 1.2, t.r * 1.2, 1);
+  return new THREE.CanvasTexture(cv);
+}
+
+export function patchSkinMaterial(
+  mat: THREE.MeshPhysicalMaterial,
+  paint: Paint,
+  skin: THREE.Color,
+  detail: THREE.Texture,
+  veins: THREE.Texture,
+  flush: { value: number },
+  flushTex: THREE.Texture,
+) {
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.uPaint0 = { value: paint.rts[0].texture };
     sh.uniforms.uPaint1 = { value: paint.rts[1].texture };
@@ -268,11 +304,13 @@ export function patchSkinMaterial(mat: THREE.MeshPhysicalMaterial, paint: Paint,
     sh.uniforms.uSkin = { value: skin };
     sh.uniforms.uDetail = { value: detail };
     sh.uniforms.uVeins = { value: veins };
+    sh.uniforms.uFlush = flush;
+    sh.uniforms.uFlushMap = { value: flushTex };
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nattribute float paintMask;\nvarying float vPaintMask;\nvarying vec2 vPaintUv;')
       .replace('#include <uv_vertex>', '#include <uv_vertex>\nvPaintUv = uv;\nvPaintMask = paintMask;');
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform sampler2D uPaint0, uPaint1, uPaint2, uDetail, uVeins;\nuniform vec3 uSkin;\nvarying float vPaintMask;\nvarying vec2 vPaintUv;')
+      .replace('#include <common>', '#include <common>\nuniform sampler2D uPaint0, uPaint1, uPaint2, uDetail, uVeins, uFlushMap;\nuniform float uFlush;\nuniform vec3 uSkin;\nvarying float vPaintMask;\nvarying vec2 vPaintUv;')
       .replace(
         '#include <map_fragment>',
         /* glsl */ `#include <map_fragment>
@@ -284,6 +322,9 @@ export function patchSkinMaterial(mat: THREE.MeshPhysicalMaterial, paint: Paint,
         vec3 top = uSkin * (0.93 + 0.14 * mott);
         top = mix(top, top * vec3(0.82, 0.86, 1.0), texture2D(uVeins, vPaintUv).r * 0.35); // faint bluish veins
         vec3 col = mix(top, diffuseColor.rgb, smoothstep(0.0, 1.0, vPaintMask));
+        // Flush: pressure areas turn pink-red (stronger on the sole), the rest warms slightly.
+        float fl = uFlush * (0.18 + 0.82 * texture2D(uFlushMap, vPaintUv).r * vPaintMask);
+        col = mix(col, col * vec3(1.06, 0.6, 0.56) + vec3(0.05, 0.0, 0.0), fl * 0.75);
         col = mix(col, col * vec3(1.0, 0.5, 0.45) + vec3(0.1, 0.0, 0.0), P0.r * 0.8);   // redness
         col = mix(col, col * vec3(0.22, 0.2, 0.26), P0.b * 0.85);                        // shading
         col = mix(col, vec3(0.025, 0.02, 0.04), P0.g * 0.96);                            // ink

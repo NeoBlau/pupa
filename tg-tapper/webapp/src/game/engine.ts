@@ -6,7 +6,7 @@ import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree, type MeshBVH 
 import type { ModelDef, ToolId } from '@shared/game.ts';
 import { createTextures, type TexName, type Textures } from './textures.ts';
 import { loadMeshFoot, loadScan, proceduralFoot, skinDetailMap, veinMap, type FootAsset } from './foot.ts';
-import { Paint, patchSkinMaterial, type LayerId, type StampOpts } from './paint.ts';
+import { Paint, flushMap, patchSkinMaterial, type LayerId, type StampOpts } from './paint.ts';
 import { loadMaterials, type Materials } from './materials.ts';
 import { createTool, type ToolName } from './tools3d.ts';
 
@@ -26,6 +26,8 @@ export interface Ptr {
   delta: THREE.Vector3;
   /** metres per second */
   speed: number;
+  /** Pressure 0..1: gamepad trigger, pen/touch pressure, or the on-screen slider. */
+  force: number;
   down: boolean;
   /** Is the tool currently over the foot? */
   hit: boolean;
@@ -78,6 +80,12 @@ export interface EngineHooks {
   onStep(view: StepView | null): void;
   onLoad?(progress: number): void;
   sfx(name: string): void;
+  /** Continuous gamepad rumble for this frame (weak = buzz, strong = thud). */
+  rumble?(weak: number, strong: number): void;
+  /** Gamepad shoulder buttons: switch tool (-1 / +1); X: next sub-tool. */
+  onPadTool?(dir: -1 | 1): void;
+  onPadSub?(): void;
+  onPadState?(connected: boolean): void;
   loop(name: string, on: boolean): void;
   haptic(kind: 'light' | 'medium' | 'heavy' | 'success' | 'error' | 'tick'): void;
 }
@@ -170,7 +178,14 @@ export class Engine {
   private finished = false;
   private lastView = '';
 
-  ptr: Ptr = { p: new THREE.Vector3(), n: new THREE.Vector3(0, 0, 1), uv: new THREE.Vector2(), delta: new THREE.Vector3(), speed: 0, down: false, hit: false };
+  ptr: Ptr = { p: new THREE.Vector3(), n: new THREE.Vector3(0, 0, 1), uv: new THREE.Vector2(), delta: new THREE.Vector3(), speed: 0, force: 0.55, down: false, hit: false };
+  /** On-screen pressure slider (used without gamepad / pressure screen). */
+  sliderForce = 0.55;
+  private penForce = -1;
+  private pad = { index: -1, x: 0, y: 0, active: false, down: false, prevButtons: [] as boolean[], reticle: null as HTMLDivElement | null };
+  private rumbleW = 0;
+  private rumbleS = 0;
+  private flushU = { value: 0 };
   private tipOffset = 0;
   private lastMoveT = 0;
   private pointers = new Set<number>();
@@ -197,6 +212,23 @@ export class Engine {
 
   constructor(hooks: EngineHooks) {
     this.hooks = hooks;
+    const extRumble = hooks.rumble;
+    hooks.rumble = (w, s) => {
+      this.rumbleW = Math.max(this.rumbleW, w);
+      this.rumbleS = Math.max(this.rumbleS, s);
+      extRumble?.(w, s);
+    };
+    const extHaptic = hooks.haptic;
+    hooks.haptic = (kind) => {
+      extHaptic(kind);
+      const k = { light: [0.3, 0], medium: [0.4, 0.4], heavy: [0.5, 0.9], success: [0.5, 0.3], error: [0.6, 1], tick: [0.15, 0] }[kind];
+      this.padPulse(k[0], k[1], kind === 'tick' ? 30 : 120);
+    };
+  }
+
+  /** Whole-foot flush (pink pressure areas), 0..1. */
+  setFlush(v: number) {
+    this.flushU.value = v;
   }
 
   // -------------------------------------------------------------------------
@@ -371,7 +403,7 @@ export class Engine {
     // Top of the foot is paler and pinker than the sole.
     this.detailMap ??= skinDetailMap(this.renderer);
     this.veins ??= veinMap();
-    patchSkinMaterial(mat, this.paint, new THREE.Color(def.skin).lerp(new THREE.Color('#f1d3cb'), 0.75).convertSRGBToLinear(), this.detailMap, this.veins);
+    patchSkinMaterial(mat, this.paint, new THREE.Color(def.skin).lerp(new THREE.Color('#f1d3cb'), 0.75).convertSRGBToLinear(), this.detailMap, this.veins, this.flushU, flushMap(asset));
     this.foot = new THREE.Mesh(g, mat);
     this.foot.castShadow = true;
     this.foot.receiveShadow = true;
@@ -763,7 +795,14 @@ export class Engine {
     return true;
   }
 
+  private readPressure(e: PointerEvent) {
+    // 0.5 is what non-pressure devices report while pressed; only trust real sensors.
+    this.penForce = e.pressure > 0 && e.pressure !== 0.5 && (e.pointerType === 'pen' || e.pointerType === 'touch') ? Math.min(1, e.pressure * 1.25) : -1;
+  }
+
   private onDown(e: PointerEvent) {
+    this.pad.active = false;
+    this.readPressure(e);
     this.pointers.add(e.pointerId);
     this.pointerType = e.pointerType;
     if (this.pointers.size > 1 || e.button !== 0) {
@@ -783,6 +822,8 @@ export class Engine {
 
   private onMove(e: PointerEvent) {
     if (this.pointers.size > 1) return;
+    if (e.pointerType !== 'mouse' || e.buttons) this.pad.active = false;
+    this.readPressure(e);
     this.pointerType = e.pointerType;
     if (e.pointerType !== 'touch') this.tipOffset = 0;
     const wasHit = this.ptr.hit;
@@ -1071,12 +1112,120 @@ export class Engine {
   }
 
   // -------------------------------------------------------------------------
+  // Gamepad: left stick = tool, right stick = camera, RT = press with force,
+  // LB/RB = tool, X = sub-tool, B = reset camera, LT / D-pad = zoom. Rumble on contact.
+
+  private pollPad(dt: number) {
+    const pads = navigator.getGamepads?.() ?? [];
+    let gp: Gamepad | null = null;
+    for (const p of pads) if (p && p.connected) { gp = p; break; }
+    if (!gp) {
+      if (this.pad.index !== -1) this.hooks.onPadState?.(false);
+      this.pad.index = -1;
+      this.pad.active = false;
+      if (this.pad.reticle) this.pad.reticle.style.display = 'none';
+      return;
+    }
+    if (this.pad.index !== gp.index) {
+      this.pad.index = gp.index;
+      this.hooks.onPadState?.(true);
+      const r = this.renderer.domElement.getBoundingClientRect();
+      this.pad.x = r.left + r.width / 2;
+      this.pad.y = r.top + r.height * 0.45;
+    }
+    const dz = (v: number) => (Math.abs(v) < 0.15 ? 0 : (v - Math.sign(v) * 0.15) / 0.85);
+    const [lx, ly, rx, ry] = [dz(gp.axes[0] ?? 0), dz(gp.axes[1] ?? 0), dz(gp.axes[2] ?? 0), dz(gp.axes[3] ?? 0)];
+    const btn = (i: number) => gp!.buttons[i]?.pressed ?? false;
+    const val = (i: number) => gp!.buttons[i]?.value ?? 0;
+    const pressed = (i: number) => btn(i) && !this.pad.prevButtons[i];
+    const rt = val(7);
+    const any = lx || ly || rx || ry || rt > 0.05 || gp.buttons.some((b) => b.pressed);
+    if (any) {
+      this.pad.active = true;
+      this.pointerType = 'gamepad';
+      this.tipOffset = 0;
+    }
+    if (!this.pad.active) return;
+
+    // Camera orbit + zoom.
+    if (rx || ry) {
+      const off = this.camera.position.clone().sub(this.controls.target);
+      const sph = new THREE.Spherical().setFromVector3(off);
+      sph.theta -= rx * dt * 1.8;
+      sph.phi = THREE.MathUtils.clamp(sph.phi - ry * dt * 1.8, 0.4, Math.PI - 0.4);
+      this.camera.position.copy(this.controls.target).add(new THREE.Vector3().setFromSpherical(sph));
+    }
+    const zoom = val(6) - (btn(13) ? 1 : 0) + (btn(12) ? 1 : 0);
+    if (zoom) {
+      const off = this.camera.position.clone().sub(this.controls.target);
+      const len = THREE.MathUtils.clamp(off.length() * (1 - zoom * dt * 0.8), this.controls.minDistance, this.controls.maxDistance);
+      this.camera.position.copy(this.controls.target).add(off.setLength(len));
+    }
+    if (pressed(1)) this.resetCamera();
+    if (pressed(4)) this.hooks.onPadTool?.(-1);
+    if (pressed(5)) this.hooks.onPadTool?.(1);
+    if (pressed(2)) this.hooks.onPadSub?.();
+
+    // Virtual cursor; slower while pressing for precision.
+    const r = this.renderer.domElement.getBoundingClientRect();
+    const speed = (this.pad.down ? 260 : 520) * dt;
+    this.pad.x = THREE.MathUtils.clamp(this.pad.x + lx * speed, r.left, r.right);
+    this.pad.y = THREE.MathUtils.clamp(this.pad.y + ly * speed, r.top, r.bottom);
+    if (!this.pad.reticle) {
+      const el = document.createElement('div');
+      el.className = 'pad-reticle';
+      this.overlay.appendChild(el);
+      this.pad.reticle = el;
+    }
+    const el = this.pad.reticle;
+    el.style.display = 'block';
+    el.style.transform = `translate(${this.pad.x - r.left}px, ${this.pad.y - r.top}px) translate(-50%, -50%) scale(${1 - rt * 0.4})`;
+
+    const wasHit = this.ptr.hit;
+    const moved = this.updatePtr({ clientX: this.pad.x, clientY: this.pad.y } as PointerEvent);
+    if (moved && !wasHit) this.ptr.delta.set(0, 0, 0);
+    const wantDown = rt > 0.06 || btn(0);
+    this.ptr.force = btn(0) && rt <= 0.06 ? 0.55 : rt;
+    if (wantDown && !this.pad.down && this.ptr.hit) {
+      this.pad.down = true;
+      this.ptr.down = true;
+      if (!this.finished) this.step?.down?.(this.ptr);
+    } else if (wantDown && this.pad.down && (lx || ly)) {
+      if (!this.finished && this.ptr.hit) this.step?.move?.(this.ptr);
+    } else if (!wantDown && this.pad.down) {
+      this.pad.down = false;
+      this.ptr.down = false;
+      if (!this.finished) this.step?.up?.(this.ptr);
+    }
+    // Light contact rumble whenever the tool presses the skin.
+    if (this.pad.down && this.ptr.hit) this.rumbleW = Math.max(this.rumbleW, 0.08 + this.ptr.force * 0.12);
+    this.pad.prevButtons = gp.buttons.map((b) => b.pressed);
+  }
+
+  private padPulse(weak: number, strong: number, ms: number) {
+    const gp = this.pad.index >= 0 ? navigator.getGamepads?.()[this.pad.index] : null;
+    const act = (gp as (Gamepad & { vibrationActuator?: { playEffect(t: string, o: object): Promise<unknown> } }) | null)?.vibrationActuator;
+    act?.playEffect('dual-rumble', { startDelay: 0, duration: ms, weakMagnitude: Math.min(1, weak), strongMagnitude: Math.min(1, strong) }).catch(() => {});
+  }
+
+  private rumbleT = 0;
+  private flushRumble() {
+    const now = performance.now();
+    if ((this.rumbleW > 0.01 || this.rumbleS > 0.01) && now - this.rumbleT > 90) {
+      this.rumbleT = now;
+      this.padPulse(this.rumbleW, this.rumbleS, 110);
+    }
+    this.rumbleW = 0;
+    this.rumbleS = 0;
+  }
+
+  // -------------------------------------------------------------------------
 
   private poseTool() {
     const t = this.tool;
     if (!t) return;
     const touch = this.pointerType === 'touch';
-    t.visible = this.ptr.hit && (this.ptr.down || !touch) && !this.finished;
+    t.visible = this.ptr.hit && (this.ptr.down || !touch || this.pad.active) && !this.finished;
     if (!t.visible) return;
     // Tool axis: mostly along the skin normal, leaning toward the camera.
     const toCam = tmpV.copy(this.camera.position).sub(this.ptr.p).normalize();
@@ -1137,7 +1286,10 @@ export class Engine {
     this.root.position.set((Math.random() - 0.5) * this.shakeAmt * 0.0004, (Math.random() - 0.5) * this.shakeAmt * 0.0004, 0);
     this.footGroup.rotation.x = Math.sin(this.time * 1.2) * 0.004;
 
+    this.pollPad(dt);
+    this.ptr.force = this.pad.active ? this.ptr.force : this.penForce >= 0 ? this.penForce : this.sliderForce;
     this.poseTool();
+    this.flushRumble();
 
     // Floating DOM texts
     const w = this.host.clientWidth;

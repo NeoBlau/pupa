@@ -5,7 +5,7 @@ import { DecalGeometry } from 'three/examples/jsm/geometries/DecalGeometry.js';
 import { acceleratedRaycast, computeBoundsTree, disposeBoundsTree, type MeshBVH } from 'three-mesh-bvh';
 import type { ModelDef, ToolId } from '@shared/game.ts';
 import { createTextures, type TexName, type Textures } from './textures.ts';
-import { loadScan, proceduralFoot, type FootAsset } from './foot.ts';
+import { loadMeshFoot, loadScan, proceduralFoot, skinDetailMap, type FootAsset } from './foot.ts';
 import { Paint, patchSkinMaterial, type LayerId, type StampOpts } from './paint.ts';
 import { loadMaterials, type Materials } from './materials.ts';
 import { createTool, type ToolName } from './tools3d.ts';
@@ -230,7 +230,7 @@ export class Engine {
 
     this.scene.background = new THREE.Color(0x0c0812);
     this.scene.fog = new THREE.Fog(0x0c0812, 0.6, 1.4);
-    const key = new THREE.DirectionalLight(0xfff1e2, 2.4);
+    const key = new THREE.DirectionalLight(0xfff7f2, 2.4);
     key.position.set(0.25, 0.45, 0.55);
     key.target.position.set(0, 0.12, 0);
     key.castShadow = true;
@@ -242,14 +242,14 @@ export class Engine {
     key.shadow.bias = -0.0004;
     key.shadow.normalBias = 0.002;
     key.shadow.radius = 6;
-    const rim = new THREE.DirectionalLight(0xff7ab8, 1.6);
+    const rim = new THREE.DirectionalLight(0xffe2d4, 0.9);
     rim.position.set(-0.45, 0.35, -0.3);
-    const fill = new THREE.HemisphereLight(0xcab8ff, 0x1a0e14, 0.35);
+    const fill = new THREE.HemisphereLight(0xf2ecff, 0x2a1e24, 0.6);
     this.scene.add(key, key.target, rim, fill, this.root);
 
     // Velvet couch the leg rests on (receives the foot's shadow).
     const couch = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 2.4), this.M.velvet);
-    couch.position.set(0, 0.1, -0.17);
+    couch.position.set(0, 0.1, -0.135); // cuts through the shin, hiding its open end
     couch.receiveShadow = true;
     this.root.add(couch, this.footGroup);
 
@@ -347,7 +347,8 @@ export class Engine {
         console.warn('Scan failed, using procedural foot', e);
         asset = await proceduralFoot(def, this.renderer);
       }
-    } else asset = await proceduralFoot(def, this.renderer);
+    } else if (def.mesh) asset = await loadMeshFoot(def, this.renderer, def.mesh);
+    else asset = await proceduralFoot(def, this.renderer);
     this.asset = asset;
     this.u = asset.length / 1160;
     this.L = asset.landmarks;
@@ -367,7 +368,9 @@ export class Engine {
       specularIntensity: 0.55,
       specularColor: new THREE.Color(0xfff0e8),
     });
-    patchSkinMaterial(mat, this.paint);
+    // Top of the foot is paler and pinker than the sole.
+    this.detailMap ??= skinDetailMap(this.renderer);
+    patchSkinMaterial(mat, this.paint, new THREE.Color(def.skin).lerp(new THREE.Color('#f1d3cb'), 0.75).convertSRGBToLinear(), this.detailMap);
     this.foot = new THREE.Mesh(g, mat);
     this.foot.castShadow = true;
     this.foot.receiveShadow = true;
@@ -396,6 +399,14 @@ export class Engine {
       list.push(i);
     }
     this.extraRest = asset.extras.map((x) => ({ o: x, p: x.position.clone(), vi: this.nearestVertex(x.position) }));
+
+    // Toenails wrap the toe tops as decals; projected from above, they can't poke through.
+    const nailDir = new THREE.Vector3(0, 0.35, -0.94).normalize();
+    for (const n of asset.nails ?? []) {
+      const s = this.surfaceAt(n.p.clone().addScaledVector(nailDir, 0.01));
+      if (!s) continue;
+      this.decal(this.M.nailDecal, s.p, nailDir, new THREE.Vector3(n.r * 1.35, n.r * 1.55, n.r * 0.5), Math.PI);
+    }
 
     // Vertices of each toe, weighted 0 at the joint → 1 toward the tip, for curling.
     // Every vertex belongs to its nearest toe only, so touching toes never tear apart.
@@ -553,6 +564,7 @@ export class Engine {
   }
 
   private extraRest: { o: THREE.Object3D; p: THREE.Vector3; vi: number }[] = [];
+  private detailMap: THREE.Texture | null = null;
 
   private hashKey(x: number, y: number, z: number) {
     const c = 0.008;

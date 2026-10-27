@@ -179,8 +179,9 @@ export function tattooProcedure(e: Engine, ctx: ProcCtx): Procedure {
     travel += d;
     // The needle stings: toes twitch now and then.
     if (Math.random() < 0.04) e.react('sting', 0.25);
-    e.force(p.p, 80 * e.u, p.delta.clone().multiplyScalar(0.15));
-    e.press(p.p, 25 * e.u, 0.0005);
+    // Soft skin: the needle tip presses in and drags the skin along.
+    e.force(p.p, 80 * e.u, p.delta.clone().multiplyScalar(0.3));
+    e.press(p.p, 40 * e.u, 0.0013);
     e.stamp('redness', p.uv, 34 * e.u, { alpha: 0.05 });
     if (travel > 30 * e.u) {
       travel = 0;

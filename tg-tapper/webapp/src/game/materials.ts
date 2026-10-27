@@ -168,6 +168,48 @@ export async function loadMaterials(r: THREE.WebGLRenderer, onProgress: (k: numb
       polygonOffsetFactor: -6,
     }),
 
+    /** Toenail with nude-pink polish, lunula and a soft cuticle edge (decal). */
+    nailDecal: new THREE.MeshPhysicalMaterial({
+      map: canvas(512, 512, (c) => {
+        c.translate(256, 256);
+        const shape = () => {
+          c.beginPath();
+          c.moveTo(-170, 210);
+          c.bezierCurveTo(-200, 40, -190, -170, 0, -200);
+          c.bezierCurveTo(190, -170, 200, 40, 170, 210);
+          c.closePath();
+        };
+        c.filter = 'blur(6px)';
+        shape();
+        c.fillStyle = 'rgba(232,170,155,0.9)';
+        c.fill();
+        c.filter = 'none';
+        const g = c.createLinearGradient(0, -200, 0, 210);
+        g.addColorStop(0, '#efbcae');
+        g.addColorStop(0.7, '#e6a594');
+        g.addColorStop(1, '#de9988');
+        c.scale(0.9, 0.9);
+        shape();
+        c.fillStyle = g;
+        c.fill();
+        c.fillStyle = 'rgba(250,225,215,0.3)';
+        c.beginPath();
+        c.ellipse(0, 175, 95, 45, 0, Math.PI, 0);
+        c.fill();
+        c.fillStyle = 'rgba(255,255,255,0.12)';
+        c.beginPath();
+        c.ellipse(-60, -40, 28, 110, -0.15, 0, Math.PI * 2);
+        c.fill();
+      }),
+      transparent: true,
+      roughness: 0.35,
+      clearcoat: 0.55,
+      clearcoatRoughness: 0.15,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -4,
+    }),
+
     /** Transfer paper with a faint printed grid. */
     feather: phys({
       map: canvas(1024, 2048, (c) => {

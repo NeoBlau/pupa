@@ -97,6 +97,8 @@ export function rubStep(
       for (const [id, a] of o.alsoErase ?? []) e.paintLine(id, prev, p.p, r, { alpha: a, erase: true });
       for (const [id, a, rr] of o.alsoPaint ?? []) e.paintLine(id, prev, p.p, rr * e.u, { alpha: a });
       if (o.drag) e.force(p.p, 90 * e.u, clampLen(p.delta.clone().multiplyScalar(o.drag), 6 * e.u * 5));
+      // Pads and swabs press into the soft skin while wiping.
+      if (o.cursor && ['cotton', 'gauze', 'towel', 'swab', 'ice', 'paper'].includes(o.cursor)) e.press(p.p, o.radius * 0.7 * e.u, 0.0011);
       prev.copy(p.p);
       o.onMove?.(p);
       const now = progress();

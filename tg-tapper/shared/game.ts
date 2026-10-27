@@ -20,6 +20,8 @@ export interface ModelDef {
   scan?: string;
   /** Euler rotation (radians) that turns the scan so toes point +Y and the sole faces +Z. */
   scanRotation?: [number, number, number];
+  /** Base mesh (foot.json + foot.bin) used when there is no scan. */
+  mesh?: string;
   /** Skin tone of the procedural foot. */
   skin: string;
   /**
@@ -44,6 +46,7 @@ const m = (id: string, name: string, unlockCost: number, baseMult: number, skin:
   unlockCost,
   baseMult,
   skin,
+  mesh: 'models/base/foot',
   sole: { albedo, height: SOLE_HEIGHT, outline: 'skin/sole_outline.json' },
   cover: [`models/${id}/cover1.svg`, `models/${id}/cover2.svg`, `models/${id}/cover3.svg`],
   gallery: [`models/${id}/g1.svg`, `models/${id}/g2.svg`, `models/${id}/g3.svg`],

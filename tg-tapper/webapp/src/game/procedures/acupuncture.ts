@@ -40,6 +40,10 @@ export function acupunctureProcedure(e: Engine, ctx: ProcCtx): Procedure {
   while (surfs.length < 6) surfs.push(e.randomSolePoint(surfs.map((s) => s.p), 120 * e.u, 0.03, 0.2));
   for (const s of surfs) pts.push({ ...s, marker: marker(e, s, 0x7cf7ff), phaseOff: Math.random(), needle: null, inserted: false, quality: 0, qi: 0, removed: false, bleed: false });
   e.debug.points = pts;
+  // Skin stays slightly dimpled around every needle that is in.
+  const holdDimples = () => {
+    for (const p of pts) if (p.inserted && !p.removed) e.press(p.p, 22 * e.u, 0.0009);
+  };
   const phase = (p: Point) => (((time / PULSE + p.phaseOff) % 1) + 1) % 1;
   const needleAt = (p: Point, lift: number) => p.p.clone().addScaledVector(p.n, lift - DEPTH);
 
@@ -69,6 +73,7 @@ export function acupunctureProcedure(e: Engine, ctx: ProcCtx): Procedure {
     update(dt) {
       time += dt;
       for (const p of pts) if (!p.inserted) p.marker.draw(phase(p), 1);
+      holdDimples();
     },
     down(ptr) {
       const p = pts.filter((q) => !q.inserted).sort((a, b) => a.p.distanceTo(ptr.p) - b.p.distanceTo(ptr.p))[0];
@@ -136,6 +141,7 @@ export function acupunctureProcedure(e: Engine, ctx: ProcCtx): Procedure {
         }
         if (near) p.needle?.rotateY(dt * 14);
       }
+      holdDimples();
       if (lines) {
         const a = (lines.geometry.attributes.position as THREE.BufferAttribute).array as Float32Array;
         a.fill(0);
@@ -204,6 +210,7 @@ export function acupunctureProcedure(e: Engine, ctx: ProcCtx): Procedure {
     },
     update(dt) {
       updateDrops(dt);
+      holdDimples();
     },
     progress: () => pts.filter((p) => p.removed).length / pts.length,
   };

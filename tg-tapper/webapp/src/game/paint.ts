@@ -260,23 +260,27 @@ export class Paint {
 }
 
 /** Patches the skin material so paint layers change colour, gloss and wetness. */
-export function patchSkinMaterial(mat: THREE.MeshPhysicalMaterial, paint: Paint) {
+export function patchSkinMaterial(mat: THREE.MeshPhysicalMaterial, paint: Paint, skin: THREE.Color, detail: THREE.Texture) {
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.uPaint0 = { value: paint.rts[0].texture };
     sh.uniforms.uPaint1 = { value: paint.rts[1].texture };
     sh.uniforms.uPaint2 = { value: paint.rts[2].texture };
+    sh.uniforms.uSkin = { value: skin };
+    sh.uniforms.uDetail = { value: detail };
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nattribute float paintMask;\nvarying float vPaintMask;\nvarying vec2 vPaintUv;')
       .replace('#include <uv_vertex>', '#include <uv_vertex>\nvPaintUv = uv;\nvPaintMask = paintMask;');
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform sampler2D uPaint0, uPaint1, uPaint2;\nvarying float vPaintMask;\nvarying vec2 vPaintUv;')
+      .replace('#include <common>', '#include <common>\nuniform sampler2D uPaint0, uPaint1, uPaint2, uDetail;\nuniform vec3 uSkin;\nvarying float vPaintMask;\nvarying vec2 vPaintUv;')
       .replace(
         '#include <map_fragment>',
         /* glsl */ `#include <map_fragment>
         vec4 P0 = clamp(texture2D(uPaint0, vPaintUv), 0.0, 1.0) * vPaintMask;
         vec4 P1 = clamp(texture2D(uPaint1, vPaintUv), 0.0, 1.0) * vPaintMask;
         vec4 P2 = clamp(texture2D(uPaint2, vPaintUv), 0.0, 1.0) * vPaintMask;
-        vec3 col = diffuseColor.rgb;
+        // The photo texture belongs to the sole only; the instep gets the plain skin tone.
+        float mott = texture2D(uDetail, vPaintUv * 2.3).b;
+        vec3 col = mix(uSkin * (0.93 + 0.14 * mott), diffuseColor.rgb, smoothstep(0.0, 1.0, vPaintMask));
         col = mix(col, col * vec3(1.0, 0.5, 0.45) + vec3(0.1, 0.0, 0.0), P0.r * 0.8);   // redness
         col = mix(col, col * vec3(0.22, 0.2, 0.26), P0.b * 0.85);                        // shading
         col = mix(col, vec3(0.025, 0.02, 0.04), P0.g * 0.96);                            // ink
@@ -291,6 +295,16 @@ export function patchSkinMaterial(mat: THREE.MeshPhysicalMaterial, paint: Paint)
         diffuseColor.rgb = col;
         float shine = clamp(P2.r + P2.g + P2.b + P1.g * 0.8 + P1.b * 0.6, 0.0, 1.0);`,
       )
+      // Sole relief (photo creases) only on the sole.
+      // Sole: photo relief. Top of the foot: tiled skin micro-detail (pores, fine lines).
+      .replace(
+        '#include <normal_fragment_maps>',
+        `#include <normal_fragment_maps>
+        vec3 dN = texture2D(uDetail, vNormalMapUv * 9.0).xyz * 2.0 - 1.0;
+        dN.xy *= 0.45;
+        vec3 nDetail = normalize(tbn * dN);
+        normal = normalize(mix(nDetail, normal, vPaintMask));`,
+      )
       .replace(
         '#include <roughnessmap_fragment>',
         '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.16, shine);\nroughnessFactor = mix(roughnessFactor, 0.85, P2.a);',
@@ -300,6 +314,6 @@ export function patchSkinMaterial(mat: THREE.MeshPhysicalMaterial, paint: Paint)
         '#include <lights_physical_fragment>\n#ifdef USE_CLEARCOAT\nmaterial.clearcoat = shine;\nmaterial.clearcoatRoughness = 0.05;\n#endif',
       )
       // Cheap subsurface scattering: warm light bleeding through the skin.
-      .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\nreflectedLight.indirectDiffuse += diffuseColor.rgb * vec3(0.32, 0.08, 0.05) * (1.0 - P2.a);');
+      .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\nreflectedLight.indirectDiffuse += diffuseColor.rgb * vec3(0.12, 0.045, 0.035) * (1.0 - P2.a);');
   };
 }

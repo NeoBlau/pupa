@@ -23,6 +23,8 @@ export interface FootAsset {
   toes: { a: THREE.Vector3; b: THREE.Vector3; r: number }[];
   /** Ankle pivot for whole-foot flinches. */
   ankle: THREE.Vector3;
+  /** Toenails to project as decals (centre on the toe's top, radius of the toe). */
+  nails?: { p: THREE.Vector3; r: number }[];
   length: number;
   /** World metres → UV units (for brush sizes). */
   uvPerMeter: number;
@@ -73,14 +75,14 @@ function smax(a: number, b: number, k: number) {
   return -smin(-a, -b, k);
 }
 
-// Toes: base → tip, radius. Big toe at -X. Measured on the reference sole photo
-// (24 cm foot): short, round toes that sit close together.
+// Toes: base → tip, radius. Big toe at -X. From the frontal/top reference photos
+// (24 cm foot): straight toes, big toe longest, small gaps between the first three.
 const TOES: { a: V3; b: V3; r: number }[] = [
-  { a: [-0.018, 0.196, -0.024], b: [-0.0175, 0.224, -0.02], r: 0.0128 },
-  { a: [0.003, 0.195, -0.024], b: [0.0045, 0.219, -0.021], r: 0.0086 },
-  { a: [0.02, 0.19, -0.024], b: [0.025, 0.212, -0.021], r: 0.0081 },
-  { a: [0.034, 0.181, -0.025], b: [0.039, 0.198, -0.022], r: 0.0076 },
-  { a: [0.046, 0.169, -0.026], b: [0.0525, 0.181, -0.023], r: 0.007 },
+  { a: [-0.019, 0.19, -0.024], b: [-0.021, 0.228, -0.021], r: 0.0125 },
+  { a: [0.002, 0.19, -0.024], b: [0.003, 0.224, -0.021], r: 0.0088 },
+  { a: [0.018, 0.186, -0.024], b: [0.022, 0.216, -0.021], r: 0.0083 },
+  { a: [0.032, 0.178, -0.025], b: [0.038, 0.204, -0.022], r: 0.0078 },
+  { a: [0.045, 0.168, -0.026], b: [0.052, 0.19, -0.023], r: 0.0072 },
 ];
 
 function footSdf(x: number, y: number, z: number) {
@@ -165,19 +167,25 @@ function makeOutlineSdf(points: [number, number][]) {
     const zs =
       -0.004 +
       0.008 * smooth01(-inner, 0, 0.022) +
-      0.009 * gauss(x, y, 0.012, 0.035, 0.03, 0.03) +
-      0.005 * gauss(x, y, 0.015, 0.165, 0.04, 0.022) -
-      0.018 * gauss(x, y, -0.03, 0.1, 0.018, 0.05) -
-      0.005 * gauss(x, y, 0.012, 0.1, 0.04, 0.05);
+      0.009 * gauss(x, y, 0.012, 0.03, 0.022, 0.025) +
+      0.005 * gauss(x, y, 0.012, 0.165, 0.04, 0.022) -
+      0.016 * gauss(x, y, -0.02, 0.09, 0.014, 0.045) -
+      0.005 * gauss(x, y, 0.012, 0.1, 0.035, 0.05);
     // Instep (−Z): heel → high midfoot → thin forefoot, lower on the outer side.
-    const zb = THREE.MathUtils.lerp(THREE.MathUtils.lerp(-0.058, -0.075, smooth01(y, 0.03, 0.12)), -0.044, smooth01(y, 0.12, 0.2)) + 0.012 * smooth01(x, 0.02, 0.06);
+    // The back of the heel is a ball, not a full-height wall: thickness shrinks toward y = 0.
+    const zb =
+      THREE.MathUtils.lerp(THREE.MathUtils.lerp(-0.058, -0.075, smooth01(y, 0.03, 0.12)), -0.044, smooth01(y, 0.12, 0.2)) +
+      0.012 * smooth01(x, 0.02, 0.06) +
+      0.024 * (1 - smooth01(y, -0.004, 0.045));
     const h = (zs - zb) / 2;
     const zc = (zs + zb) / 2;
-    const R = Math.min(h * 0.95, 0.026);
+    // Rounded rim. The radius stays below half the heel width (2.4 cm): a larger one
+    // collapses the inner offset and leaves a ridge down the middle of the heel.
+    const R = Math.min(h * 0.97, 0.018);
     const wx = inner + R;
     const wy = Math.abs(z - zc) - h + R;
     let d = Math.min(Math.max(wx, wy), 0) + Math.hypot(Math.max(wx, 0), Math.max(wy, 0)) - R;
-    d = smin(d, sdCapsule(x, y, z, [0.008, 0.05, -0.07], [0.008, 0.06, -0.2], 0.036), 0.03); // ankle → leg
+    d = smin(d, sdCapsule(x, y, z, [0.01, 0.06, -0.06], [0.01, 0.07, -0.2], 0.028), 0.03); // ankle → leg (narrower than the heel)
     d = smin(d, toesSdf(x, y, z), 0.009);
     return Math.max(d, -(z + 0.16));
   };
@@ -476,6 +484,45 @@ async function skinTextures(tone: THREE.Color, uvOf: (x: number, y: number) => [
   return { map, normalMap: gpuNormalMap(renderer, hc, 3.2), roughnessMap };
 }
 
+/** Tileable skin micro-detail for the top of the foot: pores, fine lines (normal map). */
+export function skinDetailMap(renderer: THREE.WebGLRenderer) {
+  const size = 1024;
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = size;
+  const c = cv.getContext('2d')!;
+  c.fillStyle = '#808080';
+  c.fillRect(0, 0, size, size);
+  const tileFill = (tile: HTMLCanvasElement, alpha: number, op: GlobalCompositeOperation, scale = 1) => {
+    const pat = c.createPattern(tile, 'repeat')!;
+    pat.setTransform(new DOMMatrix().scale(scale));
+    c.globalAlpha = alpha;
+    c.globalCompositeOperation = op;
+    c.fillStyle = pat;
+    c.fillRect(0, 0, size, size);
+  };
+  tileFill(poreTile(512, 700), 1, 'source-over');
+  tileFill(noiseTile(256, 8), 0.3, 'overlay');
+  tileFill(noiseTile(256, 32), 0.25, 'overlay', 2);
+  // fine criss-cross skin lines
+  c.globalAlpha = 1;
+  c.globalCompositeOperation = 'source-over';
+  c.strokeStyle = 'rgba(0,0,0,0.22)';
+  c.lineWidth = 1.4;
+  for (let i = 0; i < 900; i++) {
+    const x = Math.random() * size;
+    const y = Math.random() * size;
+    const a = (Math.random() < 0.5 ? 0.6 : 2.4) + (Math.random() - 0.5) * 0.5;
+    const l = 8 + Math.random() * 22;
+    c.beginPath();
+    c.moveTo(x, y);
+    c.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l);
+    c.stroke();
+  }
+  const t = gpuNormalMap(renderer, cv, 2.4);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  return t;
+}
+
 /** Height map → tangent-space normal map, computed on the GPU at full resolution. */
 function gpuNormalMap(renderer: THREE.WebGLRenderer, height: HTMLCanvasElement, strength: number) {
   const src = new THREE.CanvasTexture(height);
@@ -562,7 +609,7 @@ export async function proceduralFoot(def: ModelDef, renderer: THREE.WebGLRendere
   const mask = new Float32Array(pos.length / 3);
   for (let i = 0, v = 0; i < pos.length; i += 3, v++) {
     [uv[v * 2], uv[v * 2 + 1]] = uvOf(pos[i], pos[i + 1]);
-    mask[v] = THREE.MathUtils.smoothstep(n[i + 2], 0.05, 0.45);
+    mask[v] = THREE.MathUtils.smoothstep(n[i + 2], -0.15, 0.6);
   }
   g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
   g.setAttribute('paintMask', new THREE.BufferAttribute(mask, 1));
@@ -572,12 +619,10 @@ export async function proceduralFoot(def: ModelDef, renderer: THREE.WebGLRendere
 
   // Toenails on the top side of each toe.
   const nailMat = new THREE.MeshPhysicalMaterial({
-    color: tone.clone().lerp(new THREE.Color('#ffd9d2'), 0.6),
-    roughness: 0.3,
-    clearcoat: 1,
-    clearcoatRoughness: 0.08,
-    sheen: 0.3,
-    sheenColor: new THREE.Color('#ffffff'),
+    color: tone.clone().lerp(new THREE.Color('#e9a397'), 0.6),
+    roughness: 0.4,
+    clearcoat: 0.35,
+    clearcoatRoughness: 0.2,
   });
   const extras: THREE.Object3D[] = TOES.map((t) => {
     const m = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 12), nailMat);
@@ -594,6 +639,53 @@ export async function proceduralFoot(def: ModelDef, renderer: THREE.WebGLRendere
     extras,
     toes: TOES.map((t) => ({ a: new THREE.Vector3(...t.a), b: new THREE.Vector3(...t.b), r: t.r })),
     ankle: new THREE.Vector3(0.005, 0.065, -0.08),
+    length: 0.24,
+    uvPerMeter: 1 / S,
+    landmarks: LANDMARKS,
+  };
+}
+
+/**
+ * Anatomical base mesh (CC0, opengameart.org/content/human-foot-3d-model) subdivided and
+ * fitted to the reference outline offline; see public/models/base/foot.json.
+ */
+export async function loadMeshFoot(def: ModelDef, renderer: THREE.WebGLRenderer, base: string): Promise<FootAsset> {
+  const [meta, bin] = await Promise.all([fetch(`${base}.json`).then((r) => r.json()), fetch(`${base}.bin`).then((r) => r.arrayBuffer())]);
+  const n = meta.vertices as number;
+  let o = 0;
+  const take = (len: number) => {
+    const a = new Float32Array(bin, o, len);
+    o += len * 4;
+    return a;
+  };
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(take(n * 3).slice(), 3));
+  g.setAttribute('normal', new THREE.BufferAttribute(take(n * 3).slice(), 3));
+  g.setAttribute('uv', new THREE.BufferAttribute(take(n * 2).slice(), 2));
+  g.setAttribute('paintMask', new THREE.BufferAttribute(take(n).slice(), 1));
+  g.setIndex(new THREE.BufferAttribute(new Uint32Array(bin, o, meta.indices).slice(), 1));
+
+  const S = 0.26;
+  const uvOf = (x: number, y: number): [number, number] => [(x + 0.13) / S, (y + 0.01) / S];
+  const tone = new THREE.Color(def.skin);
+  const { map, normalMap, roughnessMap } = await skinTextures(tone, uvOf, renderer, def.sole);
+
+  const toes = (meta.toes as { a: V3; b: V3; r: number; nail: V3 }[]).map((t) => ({
+    a: new THREE.Vector3(...t.a),
+    b: new THREE.Vector3(...t.b),
+    r: t.r,
+    nail: new THREE.Vector3(...t.nail),
+  }));
+  const extras: THREE.Object3D[] = [];
+  return {
+    geometry: g,
+    map,
+    normalMap,
+    roughnessMap,
+    extras,
+    toes,
+    nails: toes.map((t) => ({ p: t.nail, r: t.r })),
+    ankle: new THREE.Vector3(...(meta.ankle as V3)),
     length: 0.24,
     uvPerMeter: 1 / S,
     landmarks: LANDMARKS,

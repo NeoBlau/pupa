@@ -330,7 +330,9 @@ export function patchSkinMaterial(
         col = mix(col, vec3(0.025, 0.02, 0.04), P0.g * 0.96);                            // ink
         col = mix(col, vec3(0.38, 0.14, 0.8), P0.a * 0.85);                              // stencil
         col = mix(col, vec3(0.08, 0.06, 0.1), P1.r * 0.7);                               // smudge
-        col = mix(col, vec3(0.3, 0.005, 0.015), P1.g);                                   // blood
+        // Blood: a thin film stains the skin (multiplied), a thick layer is opaque dark red.
+        col = mix(col, col * vec3(0.78, 0.1, 0.1), smoothstep(0.0, 0.45, P1.g));
+        col = mix(col, vec3(0.24, 0.008, 0.016), smoothstep(0.35, 1.0, P1.g));
         col = mix(col, vec3(0.85, 0.72, 0.34), P1.b);                                    // pus
         col = mix(col, vec3(0.95, 0.95, 0.98), P1.a * 0.85);                             // laser frost
         col *= 1.0 - P2.b * 0.12;                                                        // wet skin darkens

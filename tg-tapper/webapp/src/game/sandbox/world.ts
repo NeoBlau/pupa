@@ -285,10 +285,15 @@ export class World {
           e.hooks.haptic('light');
         }
         const last = t.path[t.path.length - 1];
-        const s = e.surfaceAt(last.clone().addScaledVector(t.dir, dt * 0.012 * (0.5 + w.pool)).add(new THREE.Vector3(Math.sin(this.time * 3 + w.id) * 0.0002, 0, 0)));
+        // Slow sideways meander (skin creases), not per-frame jitter.
+        const wander = Math.sin(t.path.length * 0.21 + w.id * 1.7) * 0.25;
+        const dir = t.dir.clone().addScaledVector(new THREE.Vector3(1, 0, 0).projectOnPlane(t.dir).normalize(), wander).normalize();
+        const s = e.surfaceAt(last.clone().addScaledVector(dir, dt * 0.012 * (0.5 + w.pool)));
         if (s) {
           t.dir = downhill(s.n);
-          e.paintLine('blood', last, s.p, 5 * e.u, { alpha: 0.95, tex: 'hard' }, 0.5);
+          // Thick at the source, thinning as it runs.
+          const width = (4.2 - Math.min(1.8, t.path.length * 0.03)) * e.u;
+          e.paintLine('blood', last, s.p, width, { alpha: 0.7 }, 0.25);
           t.path.push(s.p);
           e.moveAttached(t.tip, s.p);
         }
@@ -374,8 +379,10 @@ export class World {
       }
       if (w.pusHead && w.pus < 0.1 && w.s.p.distanceTo(p.p) < r) w.pusHead.visible = false;
       // Wiping a fresh open wound hurts a bit and breaks the clot.
-      if (w.kind !== 'pinpoint' && w.clot < 0.6 && w.s.p.distanceTo(p.p) < w.size && force > 0.6) {
-        w.clot = Math.max(0, w.clot - 0.02);
+      // Proportional to how far the pad slid, so a steady hold (with finger jitter) doesn't count.
+      const slide = delta.length();
+      if (w.kind !== 'pinpoint' && w.clot < 0.6 && w.s.p.distanceTo(p.p) < w.size && force > 0.6 && slide > 0.0008) {
+        w.clot = Math.max(0, w.clot - slide * 6);
         if (Math.random() < 0.05) e.react('sting', 0.3);
       }
     }

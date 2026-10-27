@@ -37,12 +37,16 @@ Vibration (gamepad): tattoo machine buzz, needle resistance and pop, pain thuds,
 
 ### Force matters
 - **Needle**: too soft only dimples the skin, firm goes in to a depth set by force, too hard hurts and the puncture bleeds when pulled.
+- **Skin thickness**: the heel pad is tough (needs a hard, longer push, goes in shallower, bleeds less, takes tattoo ink poorly);
+  the ball is medium; toes and the top of the foot are thin — easy to pierce, more painful, bleed more.
 - **Tattoo**: light = faint line, firm = clean line, too hard = blowout, pinpoint bleeding, pain.
 - **Cotton / gauze**: hold it *pressed* on a wound to clot it; lifting too early re-opens it.
 - **Hands**: deeper massage dents; pressing around an abscess drains it, pressing on it hurts.
 
 ### The skin reacts
 Toes clench on pain, wiggle when tickled, fan out during a massage; the foot flinches.
+Blood pools on the wound, runs downhill in streams and stays until it is blotted, foamed with
+peroxide and wiped; a cotton pad must be *held* to stop it.
 Pressure areas (heel, ball, toe pads) flush pink with massage, warm water, tickling and pain,
 then calm down; friction leaves local redness; ice cools it.
 

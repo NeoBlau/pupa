@@ -77,10 +77,14 @@ const hand: SandboxTool = {
     const d = p.delta.length();
     if (e.amountAt('oil', p.uv) > 0.3) {
       w.stats.massage += d / 0.05;
-      w.flush = clamp01(w.flush + d * 0.6);
+      w.flush = clamp01(w.flush + d * (0.6 + force));
       e.work(d / (55 * e.u));
       if (Math.random() < 0.05) e.react('pleasure', 0.6 + force * 0.3);
-    } else if (d > 0 && force > 0.5) e.stamp('redness', p.uv, 60 * e.u, { alpha: 0.01 * force }); // friction on dry skin
+    } else if (d > 0 && force > 0.2) {
+      // Dry rubbing warms the skin too, and leaves friction redness when firm.
+      w.flush = clamp01(w.flush + d * 0.35 * force);
+      if (force > 0.5) e.stamp('redness', p.uv, 60 * e.u, { alpha: 0.01 * force });
+    }
   },
   up({ w, e, p }) {
     if (st.grab) e.moveAttached(st.grab.obj, st.grab.s.p.clone().addScaledVector(st.grab.s.n, -st.grab.depth));

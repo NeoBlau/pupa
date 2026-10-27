@@ -249,7 +249,7 @@ export class World {
   update(dt: number) {
     const e = this.e;
     this.time += dt;
-    this.flush = Math.max(0, this.flush - dt * 0.012);
+    this.flush = Math.max(0, this.flush - dt * 0.006);
     e.setFlush(this.flush);
 
     // Friction redness slowly fades (wounds keep re-stamping their own inflammation).

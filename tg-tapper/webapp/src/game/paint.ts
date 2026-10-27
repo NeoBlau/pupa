@@ -331,8 +331,12 @@ export function patchSkinMaterial(
         col = mix(col, vec3(0.38, 0.14, 0.8), P0.a * 0.85);                              // stencil
         col = mix(col, vec3(0.08, 0.06, 0.1), P1.r * 0.7);                               // smudge
         // Blood: a thin film stains the skin (multiplied), a thick layer is opaque dark red.
-        col = mix(col, col * vec3(0.78, 0.1, 0.1), smoothstep(0.0, 0.45, P1.g));
-        col = mix(col, vec3(0.24, 0.008, 0.016), smoothstep(0.35, 1.0, P1.g));
+        // Blood: a thin film stains the skin (multiplied), a thick layer is opaque deep red,
+        // and the edge of a run is darker where it is drying (coffee-ring).
+        float bl = P1.g;
+        col = mix(col, col * vec3(0.8, 0.12, 0.11), smoothstep(0.0, 0.4, bl));
+        col = mix(col, vec3(0.3, 0.012, 0.02), smoothstep(0.3, 0.95, bl));
+        col *= 1.0 - 0.35 * smoothstep(0.08, 0.3, bl) * (1.0 - smoothstep(0.3, 0.65, bl));
         col = mix(col, vec3(0.85, 0.72, 0.34), P1.b);                                    // pus
         col = mix(col, vec3(0.95, 0.95, 0.98), P1.a * 0.85);                             // laser frost
         col *= 1.0 - P2.b * 0.12;                                                        // wet skin darkens
@@ -349,7 +353,14 @@ export function patchSkinMaterial(
         vec3 dN = texture2D(uDetail, vNormalMapUv * 9.0).xyz * 2.0 - 1.0;
         dN.xy *= 0.45;
         vec3 nDetail = normalize(tbn * dN);
-        normal = normalize(mix(nDetail, normal, vPaintMask));`,
+        normal = normalize(mix(nDetail, normal, vPaintMask));
+        // Blood and pus sit ON the skin: their thickness gradient gives a raised, wet meniscus.
+        vec2 tx = vec2(1.5 / 2048.0, 0.0), ty = vec2(0.0, 1.5 / 2048.0);
+        vec2 lb = texture2D(uPaint1, vPaintUv).gb;
+        float hC = lb.x + 0.6 * lb.y;
+        vec2 lx = texture2D(uPaint1, vPaintUv + tx).gb, ly = texture2D(uPaint1, vPaintUv + ty).gb;
+        vec2 grad = vec2(lx.x + 0.6 * lx.y - hC, ly.x + 0.6 * ly.y - hC) * vPaintMask;
+        normal = normalize(normal - tbn * vec3(grad * 2.2, 0.0));`,
       )
       .replace(
         '#include <roughnessmap_fragment>',

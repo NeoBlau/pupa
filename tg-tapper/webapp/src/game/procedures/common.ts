@@ -78,14 +78,14 @@ export function spray(e: Engine, s: { p: THREE.Vector3; n: THREE.Vector3 }, spre
 /** Small glossy liquid bead (blood, pus, oil, water) sitting on the skin. */
 export function bead(e: Engine, s: Surf, mat: THREE.Material, r: number) {
   const m = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 16), mat);
-  m.scale.set(r, r * 0.55, r);
+  m.scale.set(r, r * 0.42, r); // surface tension: a low dome, not a ball
   m.castShadow = true;
   e.attach(m, s.p, s.n);
   return m;
 }
 
 export function setBeadSize(m: THREE.Object3D, r: number) {
-  m.scale.set(r, r * 0.55, r);
+  m.scale.set(r, r * 0.42, r);
 }
 
 export function tweenTo(e: Engine, o: THREE.Object3D, to: THREE.Vector3, dur: number, done?: () => void) {

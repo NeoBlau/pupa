@@ -362,13 +362,17 @@ const needle: SandboxTool = {
   hold({ w, e, force, dt }) {
     const n = st.needle;
     if (!n) return;
-    // Skin resists first (dimple), then gives way.
+    const tough = w.toughness(n.s);
+    // Skin resists first (dimple), then gives way. The heel pad needs a lot more force and
+    // a longer push than the soft skin of the toes.
     if (!n.through) {
-      e.press(n.s.p, 20 * e.u, 0.0004 + 0.0026 * force);
-      st.push = force > 0.35 ? st.push + dt : Math.max(0, st.push - dt);
-      rumble(e, 0.15 + 0.4 * force, 0.1 * force);
-      w.placeNeedle({ ...n, depth: -0.0005 + force * 0.002 });
-      if (st.push > 0.2) {
+      const need = 0.2 + 0.5 * tough;
+      e.press(n.s.p, (20 + 25 * tough) * e.u, 0.0004 + 0.0026 * force * (1 - 0.3 * tough));
+      st.push = force > need ? st.push + dt * (force - need + 0.15) * 4 : Math.max(0, st.push - dt);
+      rumble(e, 0.15 + 0.4 * force + 0.3 * tough, (0.1 + 0.4 * tough) * force);
+      w.placeNeedle({ ...n, depth: -0.0005 + force * 0.002 * (1 - 0.5 * tough) });
+      if (force <= need && force > need - 0.2 && Math.random() < dt * 0.6) e.floatText(n.s.p, tough > 0.6 ? 'Thick skin — push harder' : 'Push a bit harder', '#ffd36b', 14);
+      if (st.push > 0.2 + 0.6 * tough) {
         n.through = true;
         e.impulse(n.s.p, 35 * e.u, 0.06);
         e.ripple(n.s.p, 0x7cf7ff, 0.008);
@@ -379,13 +383,15 @@ const needle: SandboxTool = {
       }
       return;
     }
-    const target = 0.002 + 0.008 * force;
-    if (target > n.depth) n.depth = Math.min(target, n.depth + dt * 0.02);
+    // Goes deeper (and slides easier) in soft tissue.
+    const target = (0.002 + 0.008 * force) * (1 - 0.35 * tough);
+    if (target > n.depth) n.depth = Math.min(target, n.depth + dt * 0.02 * (1 - 0.6 * tough));
     w.placeNeedle(n);
-    rumble(e, 0.1 + 0.3 * force, 0);
-    if (force > 0.85) {
+    rumble(e, 0.1 + 0.3 * force + 0.2 * tough, 0.15 * tough * force);
+    // Thin, nerve-rich skin (toes) hurts sooner than the heel.
+    if (force > 0.85 - 0.25 * (1 - tough)) {
       n.bleedRisk = clamp01(n.bleedRisk + dt);
-      if (Math.random() < dt * 2) w.pain(n.s, 0.7);
+      if (Math.random() < dt * 2 * (1.4 - tough)) w.pain(n.s, 0.7);
     }
     e.work(dt * 3);
   },
@@ -546,8 +552,10 @@ const machine: SandboxTool = {
       st.last.copy(p.p);
       return;
     }
+    // Thick heel skin takes ink poorly; thin skin takes it easily but bleeds more.
+    const tough = w.toughness(p);
     const r = (2.4 + 2.6 * force) * e.u;
-    e.paintLine('ink', st.last, p.p, r, { alpha: 0.35 + 0.65 * force, tex: 'hard' }, 0.5);
+    e.paintLine('ink', st.last, p.p, r, { alpha: (0.35 + 0.65 * force) * (1 - 0.45 * tough), tex: 'hard' }, 0.5);
     e.force(p.p, 80 * e.u, p.delta.clone().multiplyScalar(0.3));
     w.stats.inkLen += d;
     const T = w.tattoo;
@@ -561,7 +569,7 @@ const machine: SandboxTool = {
     }
     // Excess ink, and pinpoint bleeding that gets worse with force.
     if (Math.random() < 0.15 + 0.3 * force) e.stamp('smudge', p.p.clone().add(new THREE.Vector3(rand(-1, 1) * 0.0025, rand(-1, 1) * 0.0025, 0)), rand(12, 22) * e.u * (force > 0.85 ? 2 : 1), { alpha: 0.12 + 0.25 * force });
-    if (Math.random() < 0.05 + 0.25 * force * force) {
+    if (Math.random() < (0.05 + 0.25 * force * force) * (1.3 - 0.8 * tough)) {
       const s = e.surfaceAt(p.p.clone().add(new THREE.Vector3(rand(-1, 1) * 0.0012, rand(-1, 1) * 0.0012, 0)));
       if (s) w.addWound('pinpoint', s, { bleed: 0.04 + 0.1 * force, disinfected: false });
     }

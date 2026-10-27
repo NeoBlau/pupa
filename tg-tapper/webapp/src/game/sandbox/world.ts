@@ -13,6 +13,7 @@ export interface Trickle {
   path: THREE.Vector3[];
   dir: THREE.Vector3;
   tip: THREE.Mesh;
+  seed?: number;
 }
 
 export interface Wound {
@@ -40,6 +41,7 @@ export interface Wound {
   size: number;
   /** Seconds a pad has been pressed on it right now. */
   pressT: number;
+  spotT?: number;
 }
 
 export interface Needle {
@@ -174,6 +176,20 @@ export class World {
     }
   }
 
+  /**
+   * How thick and tough the skin is at s (0 = thin and soft, 1 = callused heel).
+   * Foot space: heel at y≈0, toes past y≈0.19, sole faces +Z.
+   */
+  toughness(s: Surf) {
+    const y = s.p.y;
+    const sole = clamp01((s.n.z - 0.2) / 0.6);
+    const heel = 1 - smooth(0.03, 0.085, y);
+    const ball = smooth(0.13, 0.155, y) * (1 - smooth(0.185, 0.2, y));
+    const toes = smooth(0.19, 0.205, y);
+    const onSole = 0.3 + 0.7 * heel + 0.35 * ball - 0.2 * toes;
+    return clamp01(0.12 + (onSole - 0.12) * sole) * (1 - 0.55 * toes);
+  }
+
   // ---------------------------------------------------------------------------
   // Needles
 
@@ -211,7 +227,9 @@ export class World {
     e.react('sting', 0.25);
     e.hooks.sfx('pop');
     // Deep or forced needles leave a bleeding puncture.
-    if (Math.random() < 0.3 + n.bleedRisk) this.addWound('puncture', { ...n.s }, { bleed: 0.15 + 0.35 * n.bleedRisk + rand(0, 0.1) });
+    // Thin skin (toes, top of the foot) bleeds more readily than the thick heel pad.
+    const thin = 1 - 0.6 * this.toughness(n.s);
+    if (Math.random() < (0.3 + n.bleedRisk) * thin) this.addWound('puncture', { ...n.s }, { bleed: (0.15 + 0.35 * n.bleedRisk + rand(0, 0.1)) * (0.6 + 0.6 * thin) });
   }
 
   // ---------------------------------------------------------------------------
@@ -278,20 +296,34 @@ export class World {
         setBeadSize(w.bead, (0.5 + 2.6 * Math.min(1, w.pool)) * 0.001 * (w.kind === 'pinpoint' ? 0.5 : 1));
         w.bead.visible = w.pool > 0.02;
       }
+      // The pooled blood wets the skin around the wound (spreads with the pool).
+      w.spotT = (w.spotT ?? 0) + dt;
+      if (w.pool > 0.08 && w.spotT > 0.2) {
+        w.spotT = 0;
+        const rr = (2.5 + 5 * Math.min(1, w.pool)) * e.u * (w.kind === 'pinpoint' ? 0.5 : 1);
+        e.stamp('blood', w.s.p.clone().addScaledVector(downhill(w.s.n), rr * 0.4), rr, { alpha: 0.12 });
+      }
       if (w.pool > 0.6 && !w.covered) {
         let t = w.trickles[w.trickles.length - 1];
         if (!t || t.path.length > 70) {
-          t = { path: [w.s.p.clone()], dir: downhill(w.s.n), tip: bead(e, w.s, e.M.blood, 0.0011) };
+          // Each new run leaves the pool from a slightly different point of its rim.
+          if (t) setBeadSize(t.tip, 0.0008);
+          const ang = rand(-0.45, 0.45);
+          const dn = downhill(w.s.n);
+          const side = new THREE.Vector3().crossVectors(w.s.n, dn).normalize();
+          const start = e.surfaceAt(w.s.p.clone().addScaledVector(side, Math.sin(ang) * w.size * 0.6)) ?? w.s;
+          t = { path: [start.p.clone()], dir: dn.multiplyScalar(Math.cos(ang)).addScaledVector(side, Math.sin(ang)).normalize(), tip: bead(e, start, e.M.blood, 0.0011), seed: rand(0, 100) };
           w.trickles.push(t);
           e.hooks.haptic('light');
         }
         const last = t.path[t.path.length - 1];
         // Slow sideways meander (skin creases), not per-frame jitter.
-        const wander = Math.sin(t.path.length * 0.21 + w.id * 1.7) * 0.25;
+        const k = t.path.length, sd = t.seed ?? 0;
+        const wander = 0.1 * Math.sin(k * 0.11 + sd) + 0.07 * Math.sin(k * 0.29 + sd * 2.3) + 0.04 * Math.sin(k * 0.67 + sd * 0.7);
         const dir = t.dir.clone().addScaledVector(new THREE.Vector3(1, 0, 0).projectOnPlane(t.dir).normalize(), wander).normalize();
         const s = e.surfaceAt(last.clone().addScaledVector(dir, dt * 0.012 * (0.5 + w.pool)));
         if (s) {
-          t.dir = downhill(s.n);
+          t.dir.lerp(downhill(s.n), 0.25).normalize(); // keeps some momentum, mostly downhill
           // Thick at the source, thinning as it runs.
           const width = (4.2 - Math.min(1.8, t.path.length * 0.03)) * e.u;
           e.paintLine('blood', last, s.p, width, { alpha: 0.7 }, 0.25);
@@ -443,4 +475,9 @@ export class World {
     this.needles = [];
     this.dressings = [];
   }
+}
+
+function smooth(a: number, b: number, x: number) {
+  const t = clamp01((x - a) / (b - a));
+  return t * t * (3 - 2 * t);
 }

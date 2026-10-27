@@ -80,7 +80,7 @@ export async function loadMaterials(r: THREE.WebGLRenderer, onProgress: (k: numb
     paper: phys({ color: 0xf6f1ff, roughness: 0.9, normalMap: cottonT.nor, normalScale: new THREE.Vector2(0.2, 0.2) }),
     ice: phys({ color: 0xbfe8ff, transmission: 0.85, thickness: 0.02, roughness: 0.15, ior: 1.31, clearcoat: 1 }),
     water: phys({ color: 0xffffff, transmission: 1, thickness: 0.003, roughness: 0.02, ior: 1.33 }),
-    blood: phys({ color: 0x5a0007, roughness: 0.06, clearcoat: 1, clearcoatRoughness: 0.03, transmission: 0.15, thickness: 0.003, attenuationColor: new THREE.Color(0x3a0004), attenuationDistance: 0.002 }),
+    blood: phys({ color: 0x6e0710, roughness: 0.05, clearcoat: 1, clearcoatRoughness: 0.02, ior: 1.36, transmission: 0.3, thickness: 0.002, attenuationColor: new THREE.Color(0x5c0006), attenuationDistance: 0.0012, specularIntensity: 1 }),
     pus: phys({ color: 0xe0c060, roughness: 0.12, clearcoat: 1, clearcoatRoughness: 0.05, sheen: 0.4, sheenColor: new THREE.Color(0xfff2b0) }),
     film: phys({ color: 0xeef6ff, transmission: 0.95, thickness: 0.0005, roughness: 0.08, transparent: true, opacity: 0.8, side: THREE.DoubleSide, normalMap: cottonT.nor, normalScale: new THREE.Vector2(0.4, 0.4) }),
     glow: new THREE.MeshBasicMaterial({ color: 0x2ef2ff }),

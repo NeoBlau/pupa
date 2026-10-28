@@ -54,6 +54,8 @@ export interface Needle {
   bleedRisk: number;
   qi: number;
   insertedAt: number;
+  /** How deep it can go here before poking out the other side (minus a safety margin). */
+  maxDepth?: number;
 }
 
 export interface Dressing {
@@ -339,7 +341,7 @@ export class World {
       }
 
       // Abscess: bulges while full; infection keeps the area red.
-      if (w.pus > 0) e.press(w.s.p, 45 * e.u, -0.0022 * w.pus);
+      if (w.pus > 0) e.press(w.s.p, 45 * e.u, -0.0026 * w.pus);
       if (w.pusHead) setBeadSize(w.pusHead, 0.0012 + 0.002 * w.pus);
       const dirty = w.dirt.length > 0 || w.pus > 0.05 || (!w.disinfected && this.time > 30 && w.kind !== 'pinpoint');
       w.infection = clamp01(w.infection + dt * (dirty ? 0.004 : -0.01));

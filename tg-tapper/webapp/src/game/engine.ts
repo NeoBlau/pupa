@@ -127,6 +127,9 @@ export const ease = {
   back: (t: number) => 1 + 2.7 * (t - 1) ** 3 + 1.7 * (t - 1) ** 2,
 };
 
+/** Skin firmness: how much of a requested dent / drag actually happens. */
+const FIRM_PRESS = 0.5;
+const FIRM_DRAG = 0.6;
 const tmpV = new THREE.Vector3();
 const tmpV2 = new THREE.Vector3();
 const UP = new THREE.Vector3(0, 1, 0);
@@ -628,6 +631,14 @@ export class Engine {
     return Math.max(0, best);
   }
 
+  /** Tissue thickness under p along -n (distance to the far side of the foot), metres. */
+  thicknessAt(p: THREE.Vector3, n: THREE.Vector3) {
+    const dir = n.clone().negate();
+    const ray = new THREE.Ray(p.clone().addScaledVector(dir, 0.0008), dir);
+    const hit = this.bvh.raycastFirst(ray, THREE.DoubleSide);
+    return hit ? hit.distance + 0.0008 : 0.06;
+  }
+
   /** Closest point on the skin with its normal and UV. */
   surfaceAt(p: THREE.Vector3) {
     const hit = this.bvh.closestPointToPoint(p);
@@ -902,12 +913,13 @@ export class Engine {
 
   /** Drag skin near p by d this frame. */
   force(p: THREE.Vector3, r: number, d: THREE.Vector3) {
-    this.forces.push({ p: p.clone(), r, d: d.clone(), push: 0 });
+    this.forces.push({ p: p.clone(), r, d: d.clone().multiplyScalar(FIRM_DRAG), push: 0 });
   }
 
   /** Press the skin in along its normal (negative depth = bulge out). */
   press(p: THREE.Vector3, r: number, depth: number) {
-    this.forces.push({ p: p.clone(), r, d: new THREE.Vector3(), push: depth });
+    // A living foot is firm: fat pads and fascia under taut skin, so dents stay shallow.
+    this.forces.push({ p: p.clone(), r, d: new THREE.Vector3(), push: depth * (depth > 0 ? FIRM_PRESS : 1) });
   }
 
   /** Instant push along the skin normal (a drop landing, a needle going in). */
@@ -966,8 +978,8 @@ export class Engine {
       }
     }
     forces.length = 0;
-    const k = 260;
-    const damp = Math.exp(-15 * dt);
+    const k = 520;
+    const damp = Math.exp(-21 * dt);
     let moving = false;
     for (let i = 0; i < base.length; i++) {
       vel[i] = (vel[i] + (target[i] - off[i]) * k * dt) * damp;

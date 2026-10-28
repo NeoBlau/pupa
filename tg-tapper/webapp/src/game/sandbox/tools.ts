@@ -93,7 +93,9 @@ const hand: SandboxTool = {
     void w;
   },
 };
-const st = { grab: null as import('./world.ts').Needle | null, grabFrom: new THREE.Vector3(), peeled: false, last: new THREE.Vector3(), drip: 0, pulse: 0, design: 'heart' as DesignId, needle: null as import('./world.ts').Needle | null, push: 0, twirl: null as import('./world.ts').Needle | null, tapFrom: new THREE.Vector3(), tapT: 0 };
+const st = { grab: null as import('./world.ts').Needle | null, grabFrom: new THREE.Vector3(), peeled: false, last: new THREE.Vector3(), drip: 0, pulse: 0, design: 'heart' as DesignId, needle: null as import('./world.ts').Needle | null, push: 0, twirl: null as import('./world.ts').Needle | null, tapFrom: new THREE.Vector3(), tapT: 0, fullMsg: false };
+/** Shaft length of the acupuncture needle (0.3 × 30 mm + handle). */
+const NEEDLE_LEN = 0.03;
 
 // ---------------------------------------------------------------------------
 // Spa
@@ -353,8 +355,9 @@ const needle: SandboxTool = {
   icon: '📍',
   group: 'clinic',
   cursor: 'needle',
-  hint: 'Push gently to go in · too soft won’t pierce · too hard hurts and bleeds · circle a needle to twirl it',
+  hint: 'Push to pierce, keep pushing to go deeper — up to the handle · deep = painful, may bleed · circle a needle to twirl it',
   down({ w, p }) {
+    st.fullMsg = false;
     st.twirl = w.findNeedle(p.p, 40 * w.e.u);
     st.needle = st.twirl ? null : w.addNeedle({ p: p.p.clone(), n: p.n.clone(), uv: p.uv.clone() });
     st.push = 0;
@@ -383,16 +386,29 @@ const needle: SandboxTool = {
       }
       return;
     }
-    // Goes deeper (and slides easier) in soft tissue.
-    const target = (0.002 + 0.008 * force) * (1 - 0.35 * tough);
-    if (target > n.depth) n.depth = Math.min(target, n.depth + dt * 0.02 * (1 - 0.6 * tough));
-    w.placeNeedle(n);
-    rumble(e, 0.1 + 0.3 * force + 0.2 * tough, 0.15 * tough * force);
-    // Thin, nerve-rich skin (toes) hurts sooner than the heel.
-    if (force > 0.85 - 0.25 * (1 - tough)) {
-      n.bleedRisk = clamp01(n.bleedRisk + dt);
-      if (Math.random() < dt * 2 * (1.4 - tough)) w.pain(n.s, 0.7);
+    // Once through the skin it keeps going while pushed (friction holds it when you ease off),
+    // up to the full 30 mm shaft. Harder push = faster; tough heel tissue slows it.
+    const rate = Math.max(0, force - 0.15) * 0.014 * (1 - 0.6 * tough);
+    n.maxDepth ??= Math.min(NEEDLE_LEN, e.thicknessAt(n.s.p, n.s.n) - 0.004);
+    if (n.depth >= n.maxDepth && force > 0.4) {
+      // Bone or the far side of a thin toe: the needle stops, pushing on only hurts.
+      if (Math.random() < dt * 2) {
+        w.pain(n.s, 0.6);
+        e.floatText(n.s.p, 'Hit bone — stop pushing', '#ff7b7b', 16);
+      }
     }
+    n.depth = Math.min(n.maxDepth, n.depth + rate * dt);
+    w.placeNeedle(n);
+    rumble(e, 0.1 + 0.3 * force + 0.2 * tough, 0.15 * tough * force + (n.depth >= NEEDLE_LEN ? 0.3 : 0));
+    if (n.depth >= NEEDLE_LEN - 1e-4 && !st.fullMsg) {
+      st.fullMsg = true;
+      e.floatText(n.s.p, 'Fully in — up to the handle', '#ffd36b', 16);
+    }
+    // Depth past ~1 cm reaches nerves and vessels: pain and bleeding risk rise with depth;
+    // thin skin (toes) hurts sooner.
+    const deep = Math.max(0, n.depth - 0.009) / (NEEDLE_LEN - 0.009);
+    n.bleedRisk = clamp01(n.bleedRisk + dt * (deep * 0.8 + (force > 0.9 ? 0.4 : 0)));
+    if (Math.random() < dt * (deep * 2.5 + (force > 0.85 ? 1 : 0)) * (1.4 - tough)) w.pain(n.s, 0.4 + 0.5 * deep);
     e.work(dt * 3);
   },
   move({ w, e, p }) {

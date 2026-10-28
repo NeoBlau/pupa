@@ -3,7 +3,8 @@
   "scripts": {
     "dev": "vite --host",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:single": "npm run build && node scripts/build-single.mjs"
   },
   "dependencies": {
     "react": "^18.3.1",

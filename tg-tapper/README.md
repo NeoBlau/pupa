@@ -8,6 +8,11 @@ Runs in any modern browser (desktop and mobile) and inside Telegram as a Mini Ap
 
 ## Run it
 
+**Easiest — one file:** `cd webapp && npm install && npm run build:single` writes `webapp/sole-spa.html`
+(~40 MB, everything inlined). Double-click it: it opens in the browser from disk, no server,
+progress saved in the browser.
+
+
 Requirements: Node 22.18+.
 
 ```bash

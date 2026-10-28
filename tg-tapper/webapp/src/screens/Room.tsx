@@ -144,7 +144,6 @@ export function Room({ active }: { active: boolean }) {
   const startOrder = (id: ToolId) => {
     const def = toolById(id);
     if (!isToolUnlocked(s.state, id)) return s.toast(`${def.name} opens at ${model.name} Lvl ${def.level}`, 'info');
-    if (id === 'removal' && !s.getTattoo(model.id)) return s.toast('No tattoo to remove yet — do a tattoo order first', 'info');
     setOrders(false);
     sb?.startOrder(id);
     haptic('light');
@@ -202,6 +201,13 @@ export function Room({ active }: { active: boolean }) {
                 </li>
               ))}
             </ul>
+            {!view!.complete &&
+              sb &&
+              order.actions?.(sb.world).map((a) => (
+                <button key={a.id} className="btn wide ghost" disabled={!a.enabled} onClick={() => { a.run(); haptic('medium'); }}>
+                  {a.label}
+                </button>
+              ))}
             {view!.complete && (
               <button className="btn wide" onClick={() => setOrders(true)}>
                 Done! Next patient →

@@ -614,30 +614,16 @@ const laser: SandboxTool = {
   group: 'clinic',
   cursor: 'laser',
   lift: 0.012,
-  hint: 'Hold over ink to shatter it. Real removal takes 6–10 sessions',
+  hint: 'Force = fluence. Firm = white frosting; too strong blisters; never pulse a spot twice per session',
   hold({ w, e, p, force, dt }) {
     st.pulse += dt;
-    e.fadeLayer('frost', dt * 0.12);
-    if (st.pulse < 0.12 - 0.05 * force) return;
+    e.fadeLayer('frost', dt * 0.03);
+    if (st.pulse < 0.12) return;
     st.pulse = 0;
-    e.particle('sparkle', p.p.clone().addScaledVector(p.n, 0.001), 0.012, { add: true, max: 0.12, tint: 0xdff8ff });
+    e.particle('sparkle', p.p.clone().addScaledVector(p.n, 0.001), 0.006 + 0.01 * force, { add: true, max: 0.12, tint: 0xdff8ff });
     e.hooks.sfx('zap');
-    rumble(e, 0.2, 0.5);
-    const c = e.paint.cellOf(p.uv.x, p.uv.y);
-    if (c < 0) return;
-    const ink = e.paint.grids.ink[c] + e.paint.grids.shade[c];
-    e.stamp('redness', p.uv, 30 * e.u, { alpha: 0.06 });
-    if (ink < 0.12) return;
-    e.stamp('ink', p.uv, 20 * e.u, { erase: true, alpha: 0.4 });
-    e.stamp('shade', p.uv, 20 * e.u, { erase: true, alpha: 0.4 });
-    e.stamp('frost', p.uv, 14 * e.u, { alpha: 0.5, tex: 'hard' });
-    e.impulse(p.p, 30 * e.u, 0.03);
-    w.stats.laserPulses++;
-    if (Math.random() < 0.3) e.react('sting', 0.35);
-    if (Math.random() < 0.07) {
-      const s = e.surfaceAt(p.p.clone().add(new THREE.Vector3(rand(-1, 1) * 0.0015, rand(-1, 1) * 0.0015, 0)));
-      if (s) w.addWound('pinpoint', s, { bleed: 0.05 });
-    }
+    rumble(e, 0.1 + 0.2 * force, 0.3 + 0.4 * force);
+    w.laserPulse(p, force);
     e.work(1.2);
   },
   up() {

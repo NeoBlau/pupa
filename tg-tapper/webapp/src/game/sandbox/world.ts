@@ -73,6 +73,11 @@ export class World {
   flush = 0;
   /** Stats the orders read. */
   stats = { massage: 0, tickle: 0, peroxideOnWound: 0, alcohol: 0, pain: 0, inkLen: 0, inkOff: 0, shadeIn: 0, shadeOut: 0, laserPulses: 0 };
+  /**
+   * Laser removal, per session: how much of the ink in each grid cell this session's pulses
+   * shattered (cleared by the body before the next session), and treatment mistakes.
+   */
+  laser = { session: 1, treated: new Map<number, number>(), burns: 0, overlaps: 0, weak: 0 };
   tattoo: { path: THREE.Vector3[]; traced: boolean[]; revealed: boolean[]; inside: (p: THREE.Vector3) => boolean; c: Surf; size: number; design: string } | null = null;
   private nextId = 1;
   private redFadeT = 0;
@@ -462,6 +467,82 @@ export class World {
     e.shake(8 * k);
     e.hooks.sfx('ouch');
     e.hooks.haptic('error');
+  }
+
+  /**
+   * One Q-switched laser pulse at p. Fluence = force: too low does nothing useful, the right
+   * fluence frosts the skin white (ink shattered), too high blisters. Pulsing the same spot twice
+   * in one session burns it.
+   */
+  laserPulse(p: Surf, force: number) {
+    const e = this.e;
+    const P = e.paint;
+    const c = P.cellOf(p.uv.x, p.uv.y);
+    if (c < 0) return;
+    const ink = P.grids.ink[c] + P.grids.shade[c];
+    e.stamp('redness', p.uv, 30 * e.u, { alpha: 0.05 + 0.05 * force });
+    if (ink < 0.08) return;
+    const L = this.laser;
+    const done = L.treated.get(c) ?? 0;
+    if (done > 0.3) {
+      // Overlap: heat builds up instead of shattering ink.
+      L.overlaps++;
+      e.stamp('redness', p.uv, 40 * e.u, { alpha: 0.25 });
+      if (Math.random() < 0.35) this.addWound('pinpoint', p, { bleed: 0.06, disinfected: false });
+      this.pain(p, 0.55);
+      e.floatText(p.p, 'Already treated — overlap burns', '#ff7b7b', 16);
+      return;
+    }
+    if (force < 0.3) {
+      L.weak++;
+      L.treated.set(c, Math.max(done, 0.08));
+      if (Math.random() < 0.15) e.floatText(p.p, 'Fluence too low — no frosting', '#ffd36b', 14);
+      return;
+    }
+    // Frosting: instant whitening (gas bubbles in the skin), fades over a few minutes.
+    e.stamp('frost', p.uv, 16 * e.u, { alpha: 0.6, tex: 'hard' });
+    e.stamp('ink', p.uv, 16 * e.u, { erase: true, alpha: 0.08 });
+    e.stamp('shade', p.uv, 16 * e.u, { erase: true, alpha: 0.08 });
+    e.impulse(p.p, 30 * e.u, 0.03);
+    let amount = 0.42;
+    if (force > 0.8) {
+      // Too much energy: blistering and pinpoint bleeding, little extra clearance.
+      amount = 0.48;
+      L.burns++;
+      e.stamp('redness', p.uv, 36 * e.u, { alpha: 0.2 });
+      if (Math.random() < 0.4) this.addWound('pinpoint', p, { bleed: 0.08, disinfected: false });
+      this.pain(p, 0.45);
+    } else if (Math.random() < 0.06) this.addWound('pinpoint', p, { bleed: 0.04 });
+    // Darker ink absorbs more, so it shatters better.
+    L.treated.set(c, Math.min(1, amount * (0.75 + 0.5 * Math.min(1, ink))));
+    this.stats.laserPulses++;
+    if (Math.random() < 0.3) e.react('sting', 0.35);
+  }
+
+  /**
+   * Weeks pass: macrophages carry the shattered ink away, the skin heals, frost and redness
+   * are gone. Dressings come off for the new session.
+   */
+  nextLaserSession() {
+    const e = this.e;
+    const P = e.paint;
+    const L = this.laser;
+    const at = new THREE.Vector3();
+    for (const [c, amt] of L.treated) {
+      if (amt < 0.1) continue;
+      P.cellWorld(c, at);
+      e.stamp('ink', at, 26 * e.u, { erase: true, alpha: amt });
+      e.stamp('shade', at, 26 * e.u, { erase: true, alpha: amt });
+    }
+    L.treated.clear();
+    L.session++;
+    e.clearLayer('frost');
+    e.clearLayer('gloss');
+    e.clearLayer('blood');
+    e.fadeLayer('redness', 1);
+    for (const w of this.wounds) w.heal = 1;
+    for (const d of [...this.dressings]) this.removeDressing(d.s.p);
+    this.flush = 0;
   }
 
   dispose() {

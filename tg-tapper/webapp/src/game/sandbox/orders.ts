@@ -26,6 +26,8 @@ export interface Order {
   /** 0..1 quality once all goals are met */
   score(w: World): number;
   dispose?(w: World): void;
+  /** Buttons shown under the checklist (e.g. "next session"). */
+  actions?(w: World): { id: string; label: string; enabled: boolean; run(): void }[];
 }
 
 export interface OrderCtx {
@@ -201,32 +203,46 @@ const tattoo: Order & { ctx?: OrderCtx } = {
   },
 };
 
+const SESSIONS_HINT = 'Real removal needs several sessions 6–8 weeks apart';
+
 const removal: Order & { inkStart?: number; cells?: number[]; ctx?: OrderCtx; c?: Surf } = {
   id: 'removal',
   title: 'Laser removal',
   icon: '🔦',
-  brief: 'Remove her tattoo with the laser, calm the skin, dress it',
+  brief: `Frost the whole tattoo once per session, cool, ointment, dressing — then the next session. ${SESSIONS_HINT}`,
   kind: 'clinic',
   setup(w, ctx) {
     const e = w.e;
     removal.ctx = ctx;
-    const t = ctx.getTattoo();
-    if (t) restoreTattoo(e, t);
-    const c = t ? e.surfaceAt(new THREE.Vector3(...t.c)) : null;
+    let t = ctx.getTattoo();
+    if (!t) {
+      // New client with an old tattoo of her own.
+      const s = e.randomSolePoint([], 0, 0.06, 0.16);
+      const t1 = new THREE.Vector3(1, 0, 0).sub(s.n.clone().multiplyScalar(s.n.x)).normalize();
+      const designs = ['heart', 'star', 'moon'] as const;
+      t = { design: designs[Math.floor(Math.random() * 3)], c: s.p.toArray() as TattooSave['c'], n: s.n.toArray() as TattooSave['n'], t1: t1.toArray() as TattooSave['t1'], size: 0.015 };
+    }
+    restoreTattoo(e, t);
+    const c = e.surfaceAt(new THREE.Vector3(...t.c));
     removal.c = c ?? e.randomSolePoint();
-    removal.cells = e.cellsInSphere(removal.c.p, 0.025).filter((i) => e.paint.grids.ink[i] + e.paint.grids.shade[i] > 0.15);
-    removal.inkStart = Math.max(1, removal.cells.length);
+    removal.cells = e.cellsInSphere(removal.c.p, 0.03).filter((i) => e.paint.grids.ink[i] + e.paint.grids.shade[i] > 0.08);
+    removal.inkStart = removal.cells.reduce((a, i) => a + Math.min(1, e.paint.grids.ink[i] + e.paint.grids.shade[i]), 0) || 1;
   },
   goals(w) {
     const e = w.e;
     const g = e.paint.grids;
-    const left = (removal.cells ?? []).filter((i) => g.ink[i] + g.shade[i] > 0.15).length;
-    const gone = 1 - left / (removal.inkStart ?? 1);
-    const area = e.cellsInSphere(removal.c!.p, 0.025);
-    const covered = w.dressings.some((d) => d.s.p.distanceTo(removal.c!.p) < 0.025);
-    const goals = [
-      { label: `Laser the ink (${pct(gone / 0.9)})`, done: gone >= 0.9, value: gone / 0.9 },
-      { label: 'Calm the redness with ice', done: gone >= 0.9 && e.coverage('redness', area, 0.3) < 0.15 },
+    const cells = removal.cells ?? [];
+    const inkNow = cells.reduce((a, i) => a + Math.min(1, g.ink[i] + g.shade[i]), 0);
+    const cleared = 1 - inkNow / (removal.inkStart ?? 1);
+    const withInk = cells.filter((i) => g.ink[i] + g.shade[i] > 0.08);
+    const treated = withInk.length ? withInk.filter((i) => (w.laser.treated.get(i) ?? 0) > 0.3).length / withInk.length : 1;
+    const area = e.cellsInSphere(removal.c!.p, 0.03);
+    const covered = w.dressings.some((d) => d.s.p.distanceTo(removal.c!.p) < 0.03);
+    const S = w.laser.session;
+    const goals: Goal[] = [
+      { label: `Ink cleared (${pct(cleared / 0.9)}) · session ${S}`, done: cleared >= 0.9, value: cleared / 0.9 },
+      { label: `Frost the whole tattoo this session (${pct(treated / 0.9)})`, done: treated >= 0.9 || cleared >= 0.9, value: treated / 0.9 },
+      { label: 'Cool the skin with ice', done: e.coverage('redness', area, 0.3) < 0.15 && e.coverage('frost', area, 0.3) < 0.2 },
       { label: 'Blot pinpoint bleeding', done: w.wounds.filter((x) => x.kind === 'pinpoint' && x.pool > 0.05 && x.heal < 1).length === 0 },
       { label: 'Ointment', done: e.coverage('gloss', area, 0.4) > 0.5 },
       { label: 'Dress it', done: covered },
@@ -234,7 +250,15 @@ const removal: Order & { inkStart?: number; cells?: number[]; ctx?: OrderCtx; c?
     if (goals.every((x) => x.done)) removal.ctx?.saveTattoo(null);
     return goals;
   },
-  score: (w) => Math.max(0, 1 - w.stats.pain * 0.05),
+  actions(w) {
+    const goals = removal.goals(w);
+    const sessionDone = goals.slice(1).every((g) => g.done);
+    return goals[0].done
+      ? []
+      : [{ id: 'next', label: sessionDone ? `⏭ Next session (+6 weeks)` : `⏭ Next session — finish this one first`, enabled: sessionDone, run: () => w.nextLaserSession() }];
+  },
+  // Fewer sessions, no burns or overlaps = better.
+  score: (w) => Math.max(0, 1 - w.stats.pain * 0.03 - w.laser.burns * 0.02 - w.laser.overlaps * 0.03 - Math.max(0, w.laser.session - 3) * 0.1),
 };
 
 export const ORDERS: Order[] = [oil, wash, tickle, wound, needles, tattoo, removal];

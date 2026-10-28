@@ -4,6 +4,7 @@ import {
   ITEM_IDS,
   STAGES,
   TOOLS,
+  MODELS,
   currentModelMult,
   isBoostActive,
   isToolUnlocked,
@@ -72,6 +73,7 @@ export function Room({ active }: { active: boolean }) {
     engine.current = e;
     if (location.search.includes('debug')) (window as unknown as { __engine: Engine; __sandbox: () => Sandbox | null }).__engine = e;
     (window as unknown as { __sandbox: () => Sandbox | null }).__sandbox = () => sandbox.current;
+    if (location.search.includes('debug')) (window as unknown as { __models: typeof MODELS }).__models = MODELS;
     let alive = true;
     void e.init(host.current!, overlay.current!).then(() => {
       if (!alive) e.destroy();

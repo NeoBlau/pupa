@@ -361,6 +361,8 @@ export class Engine {
 
   async loadModel(def: ModelDef) {
     this.model = def;
+    // Nails take on some of the skin's undertone (pale nails on dark skin look painted on).
+    this.M.nailDecal.color.set(0xffffff).lerp(new THREE.Color(def.skin).convertSRGBToLinear(), 0.4);
     this.setProcedure(null);
     for (const a of this.attached) a.o.removeFromParent();
     this.attached = [];
@@ -403,7 +405,7 @@ export class Engine {
     // Top of the foot is paler and pinker than the sole.
     this.detailMap ??= skinDetailMap(this.renderer);
     this.veins ??= veinMap();
-    patchSkinMaterial(mat, this.paint, new THREE.Color(def.skin).lerp(new THREE.Color('#f1d3cb'), 0.75).convertSRGBToLinear(), this.detailMap, this.veins, this.flushU, flushMap(asset));
+    patchSkinMaterial(mat, this.paint, new THREE.Color(def.skin).lerp(new THREE.Color('#f1d3cb'), def.skinLerp ?? 0.75).convertSRGBToLinear(), this.detailMap, this.veins, this.flushU, flushMap(asset));
     this.foot = new THREE.Mesh(g, mat);
     this.foot.castShadow = true;
     this.foot.receiveShadow = true;

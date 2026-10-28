@@ -24,6 +24,8 @@ export interface ModelDef {
   mesh?: string;
   /** Skin tone of the procedural foot. */
   skin: string;
+  /** How far the top-of-foot tone is lightened toward a pale base (0..1, default 0.75). */
+  skinLerp?: number;
   /**
    * Real skin detail baked from a sole photo into the foot's UV space (see README):
    * `height` = creases & pores (used for relief), `albedo` = the photo's colour.
@@ -40,27 +42,41 @@ export interface ModelDef {
 
 const SOLE_HEIGHT = 'skin/sole_height.webp';
 
-const m = (id: string, name: string, unlockCost: number, baseMult: number, skin: string, albedo?: string): ModelDef => ({
-  id,
-  name,
-  unlockCost,
-  baseMult,
-  skin,
-  mesh: 'models/base/foot',
-  sole: { albedo, height: SOLE_HEIGHT, outline: 'skin/sole_outline.json' },
-  cover: [`models/${id}/cover1.svg`, `models/${id}/cover2.svg`, `models/${id}/cover3.svg`],
-  gallery: [`models/${id}/g1.svg`, `models/${id}/g2.svg`, `models/${id}/g3.svg`],
-  galleryLevels: [2, 5, 10],
-});
+const m = (
+  id: string,
+  name: string,
+  unlockCost: number,
+  baseMult: number,
+  skin: string,
+  photo?: { albedo: string; height?: string; covers?: boolean; skinLerp?: number; mesh?: boolean },
+): ModelDef => {
+  const cover = photo?.covers ? [1, 2, 3].map((i) => `models/${id}/cover${i}.webp`) : [1, 2, 3].map((i) => `models/${id}/cover${i}.svg`);
+  return {
+    id,
+    name,
+    unlockCost,
+    baseMult,
+    skin,
+    skinLerp: photo?.skinLerp,
+    mesh: photo?.mesh ? `models/${id}/foot` : 'models/base/foot',
+    sole: { albedo: photo?.albedo, height: photo?.height ?? SOLE_HEIGHT, outline: 'skin/sole_outline.json' },
+    cover,
+    gallery: photo?.covers ? cover : [1, 2, 3].map((i) => `models/${id}/g${i}.svg`),
+    galleryLevels: [2, 5, 10],
+  };
+};
 
 // Cover/gallery .svg files are placeholders: replace them with your photos (see README).
+// The first model keeps the id 'anna' so existing saves stay valid; she is shown as Leri.
 export const MODELS: ModelDef[] = [
-  m('anna', 'Anna', 0, 1, '#c18c6d', 'skin/sole_albedo.webp'),
-  m('kate', 'Kate', 20_000, 1.5, '#f5cfb6'),
-  m('kim', 'Kim', 50_000, 2.2, '#eec7a1'),
-  m('tiffany', 'Tiffany', 50_000, 2.2, '#8e5a3b'),
-  m('mia', 'Mia', 150_000, 3.5, '#e5b691'),
-  m('lola', 'Lola', 400_000, 5, '#c88e6a'),
+  m('anna', 'Leri', 0, 1, '#c18c6d', { albedo: 'skin/sole_albedo.webp', mesh: true }),
+  m('alexa', 'Alexa', 15_000, 1.4, '#e9c3b2', { albedo: 'skin/alexa_albedo.webp', height: 'skin/alexa_height.webp', covers: true, skinLerp: 0.45, mesh: true }),
+  m('tuni', 'Tuni', 40_000, 2, '#c08a6c', { albedo: 'skin/tuni_albedo.webp', height: 'skin/tuni_height.webp', covers: true, skinLerp: 0.3, mesh: true }),
+  m('kate', 'Kate', 80_000, 2.6, '#f5cfb6'),
+  m('kim', 'Kim', 150_000, 3.2, '#eec7a1'),
+  m('tiffany', 'Tiffany', 150_000, 3.2, '#8e5a3b'),
+  m('mia', 'Mia', 300_000, 4, '#e5b691'),
+  m('lola', 'Lola', 600_000, 5.5, '#c88e6a'),
 ];
 
 export const MAX_LEVEL = 10;
